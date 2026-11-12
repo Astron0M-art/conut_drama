@@ -156,3 +156,82 @@ test('合成DOCX中标题样式、灰底、多run、表格和软换行不改变�
     { full: 10, clean: 10, pure: 5 },
   ]);
 });
+
+test('连续重复的第8、9、10集标题各只产生一集，不制造空集或计入标题字数', () => {
+  const paragraphs = ['剧本正文'];
+  for (const no of [8, 9, 10]) {
+    paragraphs.push(`第 ${no} 集`, `第${no}集`, `${no}–1 日 内 房间`, '人物：甲', '甲：你好。');
+  }
+  const result = analyzeParagraphs(paragraphs);
+  assert.deepEqual(result.episodes.map((episode) => episode.no), [8, 9, 10]);
+  for (const episode of result.episodes) {
+    assert.deepEqual(episode.counts, { full: 14, clean: 14, pure: 5 });
+    assert.equal(episode.paragraphs, 3);
+    assert.equal(episode.scenes, 1);
+  }
+  assert.equal(result.issues.some((issue) => issue.type === 'dup'), false);
+});
+
+test('重复标题兼容空行、分页空段、中文数字、全角数字和Markdown，并保留已有集标题', () => {
+  const result = analyzeBuffer(Buffer.from([
+    '剧本正文', '第 8 集 云端', '', '\f', '**第八集**', '第８集',
+    '8-1 日 内 房间', '人物：甲', '甲：你好。',
+  ].join('\n')), 'duplicate-headings.txt');
+  assert.equal(result.episodes.length, 1);
+  assert.equal(result.episodes[0].no, 8);
+  assert.equal(result.episodes[0].title, '云端');
+  assert.deepEqual(result.episodes[0].counts, { full: 14, clean: 14, pure: 5 });
+  assert.equal(result.episodes[0].paragraphs, 3);
+  assert.equal(result.issues.some((issue) => issue.type === 'dup'), false);
+});
+
+test('不同集的真实空集不会因重复标题去重而消失', () => {
+  const result = analyzeParagraphs(['剧本正文', '第1集', '第1集', '第2集', '甲：你好。']);
+  assert.deepEqual(result.episodes.map((episode) => episode.no), [1, 2]);
+  assert.deepEqual(result.episodes.map((episode) => episode.counts.full), [0, 5]);
+  assert.deepEqual(result.episodes.map((episode) => episode.paragraphs), [0, 1]);
+  assert.equal(result.issues.some((issue) => issue.type === 'dup'), false);
+});
+
+test('分页重复集标题后场次递增时累加同集正文，并排除续页标题', () => {
+  const result = analyzeParagraphs([
+    '剧本正文', '第8集 云端', '8-1 日 内 房间', '人物：甲', '甲：你好。',
+    '', '第 8 集', '', '8-2 夜 外 街道', '人物：乙', '乙：再见。',
+  ]);
+  assert.equal(result.episodes.length, 1);
+  assert.equal(result.episodes[0].no, 8);
+  assert.equal(result.episodes[0].title, '云端');
+  assert.equal(result.episodes[0].scenes, 2);
+  assert.equal(result.episodes[0].paragraphs, 6);
+  assert.deepEqual(result.episodes[0].counts, { full: 28, clean: 28, pure: 10 });
+  assert.equal(result.issues.some((issue) => issue.type === 'dup'), false);
+});
+
+test('有正文的同号集重新从相同场次开始时仍提示重复，不能当成分页续写', () => {
+  const result = analyzeParagraphs([
+    '剧本正文', '第8集', '8-1 日 内 房间', '甲：你好。',
+    '第8集', '8-1 日 内 房间', '乙：再见。',
+  ]);
+  assert.ok(result.issues.some((issue) => issue.type === 'dup' || /重复|无法确认|歧义/.test(issue.text)));
+  assert.equal(result.episodes.reduce((sum, episode) => sum + episode.counts.pure, 0), 10);
+});
+
+test('DOCX标题样式与普通段落重复同集时忽略分页空段且只统计一次正文', () => {
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+  <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>
+    <w:p><w:r><w:t>剧本正文</w:t></w:r></w:p>
+    <w:p><w:pPr><w:pStyle w:val="Heading2"/></w:pPr><w:r><w:t>第 8 集</w:t></w:r></w:p>
+    <w:p><w:r><w:br w:type="page"/></w:r></w:p>
+    <w:p><w:r><w:t>第</w:t></w:r><w:r><w:t>8</w:t></w:r><w:r><w:t>集</w:t></w:r></w:p>
+    <w:p><w:r><w:t>8–1 日 内 房间</w:t></w:r></w:p>
+    <w:p><w:r><w:t>人物：甲</w:t></w:r></w:p>
+    <w:p><w:r><w:t>甲：你好。</w:t></w:r></w:p>
+  </w:body></w:document>`;
+  const result = analyzeBuffer(zip([['word/document.xml', xml]]), 'duplicate-heading-layout.docx');
+  assert.equal(result.episodes.length, 1);
+  assert.equal(result.episodes[0].no, 8);
+  assert.equal(result.episodes[0].paragraphs, 3);
+  assert.equal(result.episodes[0].scenes, 1);
+  assert.deepEqual(result.episodes[0].counts, { full: 14, clean: 14, pure: 5 });
+  assert.equal(result.issues.some((issue) => issue.type === 'dup'), false);
+});
