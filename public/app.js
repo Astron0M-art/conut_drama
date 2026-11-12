@@ -152,7 +152,7 @@ function bookHTML(b) {
       <span class="chip ok">合格 <b>${eps.length - bad.length}</b></span>
       ${bad.length ? `<span class="chip bad">打回 <b>${bad.length}</b></span>` : ''}
       <span class="chip">平均 <b>${fmt(avg)}</b> ${unit}</span>
-      <span class="chip rule" title="${en ? '识别为英文剧本：按英文单词计数（≥2 个字母，数字与标点不计）' : '识别为中文剧本：只数汉字，中文标点、英文、数字、空白都不算'}">${en ? '英文剧本 · 按单词计数' : '按汉字计数'}</span>
+      <span class="chip rule" title="${en ? '识别为英文剧本：按英文单词计数（≥2 个字母，数字与标点不计）' : '识别为中文剧本：汉字、标点各计 1 字，英文单词每词计 1 字；数字、空白不计'}">${en ? '英文剧本 · 按单词计数' : '含标点与英文词'}</span>
       ${issues.map((i) => `<span class="chip warn">⚠ ${esc(i.text)}</span>`).join('')}
     </div>`;
 
@@ -217,7 +217,7 @@ function rejectText(b) {
   const { eps, bad } = summarize(b);
   const en = b.result.lang === 'en';
   const unit = en ? '词' : '字';
-  const lines = [`《${b.name}》共 ${eps.length} 集，正文${en ? '英文单词数' : '汉字数'}要求 ${state.min}–${state.max}（${CALIBERS[state.caliber]}），以下 ${bad.length} 集不合格，请重申：`];
+  const lines = [`《${b.name}》共 ${eps.length} 集，正文${en ? '英文单词数' : '字数（含标点与英文单词）'}要求 ${state.min}–${state.max}（${CALIBERS[state.caliber]}），以下 ${bad.length} 集不合格，请重申：`];
   for (const e of bad) {
     const why = e.v.kind === 'empty' ? '空集，无正文' : e.v.kind === 'short' ? `${fmt(e.n)} ${unit}，少 ${fmt(e.v.diff)} ${unit}` : `${fmt(e.n)} ${unit}，多 ${fmt(e.v.diff)} ${unit}`;
     lines.push(`第${e.no}集${e.title ? '「' + e.title + '」' : ''}：${why}`);
@@ -238,11 +238,11 @@ async function copy(text) {
 }
 
 function csvText() {
-  // 计数方式：中文剧本数汉字，英文剧本数单词；最后一列是 WPS 规则的字数，仅供对照
+  // 中文剧本统计汉字、标点和英文词；英文剧本数单词。最后一列为 WPS 参考值。
   const rows = [['剧本', '集', '标题', '场数', '计数方式', '整集原文', '纯台词+动作', `判定(${CALIBERS[state.caliber]} ${state.min}-${state.max})`, '差值', 'WPS字数(参考,含标点与英文)']];
   for (const b of state.books.filter((x) => x.status === 'done')) {
     for (const e of summarize(b).eps) {
-      rows.push([b.name, e.no, e.title, e.scenes, b.result.lang === 'en' ? '英文单词' : '汉字', e.counts.full, e.counts.pure, e.v.label, e.v.diff, e.words[state.caliber]]);
+      rows.push([b.name, e.no, e.title, e.scenes, b.result.lang === 'en' ? '英文单词' : '汉字+标点+英文单词', e.counts.full, e.counts.pure, e.v.label, e.v.diff, e.words[state.caliber]]);
     }
   }
   return '\uFEFF' + rows.map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\r\n');

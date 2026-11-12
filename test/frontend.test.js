@@ -19,8 +19,8 @@ test('中英文混合分析结果能被页面汇总、明细及 CSV 消费', () 
   vm.runInContext(source.slice(0, source.indexOf('/* ---------------- 事件')), context);
   vm.runInContext('state.books = [book]', context);
   assert.strictEqual(vm.runInContext('summarize(book).eps[0].n', context), 7);
-  assert.match(vm.runInContext('bookHTML(book)', context), /按汉字计数/);
-  assert.match(vm.runInContext('csvText()', context), /"汉字","7","7","偏少","543","7"/);
+  assert.match(vm.runInContext('bookHTML(book)', context), /含标点与英文词/);
+  assert.match(vm.runInContext('csvText()', context), /"汉字\+标点\+英文单词","7","7","偏少","543","7"/);
   vm.runInContext("state.caliber = 'pure'", context);
   assert.strictEqual(vm.runInContext('summarize(book).eps[0].n', context), 7);
 
@@ -28,5 +28,5 @@ test('中英文混合分析结果能被页面汇总、明细及 CSV 消费', () 
   book.result = analyzeBuffer(Buffer.from(`第1集\n${'甲'.repeat(549)} Jack\n`), '边界回归.txt');
   assert.strictEqual(vm.runInContext('summarize(book).eps[0].n', context), 550);
   assert.strictEqual(vm.runInContext('summarize(book).eps[0].v.kind', context), 'ok');
-  assert.match(vm.runInContext('csvText()', context), /"汉字","550","550","合格","0","550"/);
+  assert.match(vm.runInContext('csvText()', context), /"汉字\+标点\+英文单词","550","550","合格","0","550"/);
 });

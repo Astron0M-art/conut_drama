@@ -33,14 +33,14 @@
 
   <aside class="note" role="note">
     <span class="note-tag">字数规则</span>
-    <span>只数<b>汉字</b>（中文标点、英文、数字、空白都不算）；如果是<b>英文剧本</b>，则按<b>英文单词</b>计数。</span>
+    <span>中文剧本中，<b>汉字、标点</b>各计 1 字，夹杂的<b>英文单词</b>每词计 1 字；数字、空白不计。<b>英文剧本</b>按英文单词计数。</span>
   </aside>
 
   <section class="bar" id="bar" hidden>
     <div class="group cal">
       <span class="label">统计口径</span>
       <div class="seg" id="caliber" role="radiogroup">
-        <button data-v="full" role="radio" title="整集所有文字（含场景头、人物行）里的汉字；英文剧本则数英文单词">整集原文</button>
+        <button data-v="full" role="radio" title="整集正文（含场景头、人物行）按汉字、标点和英文单词统计；英文剧本按单词统计">整集原文</button>
         <button data-v="pure" role="radio" title="去掉场景头和「人物：」行，只数台词与动作">纯台词+动作</button>
       </div>
     </div>
@@ -58,7 +58,7 @@
   <div id="books"></div>
 </main>
 
-<footer>字数规则：中文剧本只数汉字（中文标点、英文、数字、空白都不算）；英文剧本按英文单词计数（≥2 个字母，数字与标点不计）。</footer>
+<footer>字数规则：中文剧本的汉字、标点各计 1 字，英文单词每词计 1 字，数字、空白不计；英文剧本按英文单词计数（≥2 个字母，数字与标点不计）。</footer>
 
 <div class="overlay" id="overlay"><div>松开鼠标，开始分析</div></div>
 <div class="toast" id="toast" role="status"></div>
