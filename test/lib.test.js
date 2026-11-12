@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert');
-const { countWords } = require('../lib/wps');
+const { countWords, countChineseDrama } = require('../lib/wps');
 const { analyzeParagraphs, stripTranslations, toNumber } = require('../lib/episodes');
 const { analyzeBuffer } = require('../lib/analyze');
 
@@ -62,7 +62,7 @@ test('文本文件、未识别分集、不支持的格式', () => {
 test('中文主统计包含中文和半角标点，保留原 WPS 参考字段', () => {
   const r = analyzeParagraphs(['第1集 标题不参与统计', '你好，世界！ Hello 123']);
   assert.strictEqual(r.lang, 'zh');
-  assert.deepStrictEqual(r.episodes[0].counts, { full: 6, clean: 6, pure: 6 });
+  assert.deepStrictEqual(r.episodes[0].counts, { full: 7, clean: 7, pure: 7 });
   assert.deepStrictEqual(r.episodes[0].words, { full: 7, clean: 7, pure: 7 });
   for (const text of ['你好，世界！', '你好,世界!']) {
     const e = analyzeParagraphs(['第1集', text]).episodes[0];
@@ -74,13 +74,33 @@ test('中文主统计包含中文和半角标点，保留原 WPS 参考字段', 
   assert.strictEqual(punctuation.episodes[0].counts.full, 6);
 });
 
+test('中文夹杂的英文单词各计 1 字，单字母词和词内标点不重复计数', () => {
+  const cases = [
+    ['Jack刚刚告诉我。', 7], // Jack + 刚刚告诉我（5）+ 句号
+    ['Jack和Lily说：Hello, world!', 9], // 4 个词 + 2 个汉字 + 3 个标点
+    ['甲说：I am a hero!', 8],
+    ["甲说：don't well-known。", 6],
+    ['甲说：“Jack”！', 7],
+    ['甲说：Jack，Lily! 123\t　', 7],
+  ];
+  for (const [text, expected] of cases) {
+    assert.strictEqual(countChineseDrama(text), expected, text);
+    const result = analyzeParagraphs(['第1集', text]);
+    assert.strictEqual(result.lang, 'zh');
+    assert.deepStrictEqual(result.episodes[0].counts,
+      { full: expected, clean: expected, pure: expected }, text);
+  }
+  assert.strictEqual(countChineseDrama(''), 0);
+  assert.strictEqual(countChineseDrama('123\n\t　'), 0);
+});
+
 test('中文正文不会被长篇外语括号误判；纯台词统计排除场景与人物行', () => {
   const r = analyzeParagraphs([
     '第1集', '1-1 夜 内 家', '人物：甲',
     '甲：你好。（Hello there, this long translated sentence must not change the language.）',
   ]);
   assert.strictEqual(r.lang, 'zh');
-  assert.deepStrictEqual(r.episodes[0].counts, { full: 17, clean: 13, pure: 5 });
+  assert.deepStrictEqual(r.episodes[0].counts, { full: 28, clean: 13, pure: 5 });
   assert.ok(r.episodes[0].words.full > r.episodes[0].words.clean);
 });
 
