@@ -59,11 +59,19 @@ test('文本文件、未识别分集、不支持的格式', () => {
   assert.throws(() => analyzeBuffer(Buffer.from('x'), 'd.docx'), /docx/);
 });
 
-test('中文统计只数汉字，保留含标点的 WPS 参考字段', () => {
+test('中文主统计包含中文和半角标点，保留原 WPS 参考字段', () => {
   const r = analyzeParagraphs(['第1集 标题不参与统计', '你好，世界！ Hello 123']);
   assert.strictEqual(r.lang, 'zh');
-  assert.deepStrictEqual(r.episodes[0].counts, { full: 4, clean: 4, pure: 4 });
+  assert.deepStrictEqual(r.episodes[0].counts, { full: 6, clean: 6, pure: 6 });
   assert.deepStrictEqual(r.episodes[0].words, { full: 7, clean: 7, pure: 7 });
+  for (const text of ['你好，世界！', '你好,世界!']) {
+    const e = analyzeParagraphs(['第1集', text]).episodes[0];
+    assert.deepStrictEqual(e.counts, { full: 6, clean: 6, pure: 6 });
+    assert.strictEqual(e.words.full, text.includes('，') ? 6 : 4);
+  }
+  const punctuation = analyzeParagraphs(['第1集', '，。!?() 123']);
+  assert.strictEqual(punctuation.lang, 'zh');
+  assert.strictEqual(punctuation.episodes[0].counts.full, 6);
 });
 
 test('中文正文不会被长篇外语括号误判；纯台词统计排除场景与人物行', () => {
@@ -72,7 +80,7 @@ test('中文正文不会被长篇外语括号误判；纯台词统计排除场�
     '甲：你好。（Hello there, this long translated sentence must not change the language.）',
   ]);
   assert.strictEqual(r.lang, 'zh');
-  assert.deepStrictEqual(r.episodes[0].counts, { full: 9, clean: 9, pure: 3 });
+  assert.deepStrictEqual(r.episodes[0].counts, { full: 17, clean: 13, pure: 5 });
   assert.ok(r.episodes[0].words.full > r.episodes[0].words.clean);
 });
 

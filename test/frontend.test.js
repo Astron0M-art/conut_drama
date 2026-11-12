@@ -18,9 +18,9 @@ test('实际分析结果能被页面汇总、明细及 CSV 消费', () => {
   const context = vm.createContext({ book, innerWidth: 1024, document: { getElementById: () => ({ clientWidth: 900 }) } });
   vm.runInContext(source.slice(0, source.indexOf('/* ---------------- 事件')), context);
   vm.runInContext('state.books = [book]', context);
-  assert.strictEqual(vm.runInContext('summarize(book).eps[0].n', context), 4);
+  assert.strictEqual(vm.runInContext('summarize(book).eps[0].n', context), 6);
   assert.match(vm.runInContext('bookHTML(book)', context), /按汉字计数/);
-  assert.match(vm.runInContext('csvText()', context), /"汉字","4","4","偏少","546","6"/);
+  assert.match(vm.runInContext('csvText()', context), /"汉字","6","6","偏少","544","6"/);
   vm.runInContext("state.caliber = 'pure'", context);
-  assert.strictEqual(vm.runInContext('summarize(book).eps[0].n', context), 4);
+  assert.strictEqual(vm.runInContext('summarize(book).eps[0].n', context), 6);
 });
