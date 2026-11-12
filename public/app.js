@@ -3,7 +3,7 @@
 const MAX_BOOKS = 10;
 const CONCURRENCY = 4;
 const EXTS = ['.docx', '.txt', '.md'];
-const CALIBERS = { full: '整集原文', pure: '纯台词+动作' };
+const CALIBERS = { full: '整集正文', pure: '纯台词+动作' };
 
 const $ = (id) => document.getElementById(id);
 const fmt = (n) => n.toLocaleString('zh-CN');
@@ -153,7 +153,7 @@ function bookHTML(b) {
       <span class="chip ok">合格 <b>${eps.length - bad.length}</b></span>
       ${bad.length ? `<span class="chip bad">打回 <b>${bad.length}</b></span>` : ''}
       <span class="chip">平均 <b>${fmt(avg)}</b> ${unit}</span>
-      <span class="chip rule" title="${en ? '识别为英文剧本：按英文单词计数（≥2 个字母，数字与标点不计）' : '识别为中文剧本：汉字、标点各计 1 字，英文单词每词计 1 字；数字、空白不计'}">${en ? '英文剧本 · 按单词计数' : '含标点与英文词'}</span>
+      <span class="chip rule" title="${en ? '识别为英文剧本：按英文单词计数（≥2 个字母，数字与标点不计）' : '中文汉字、标点各计 1 字，夹杂英文每词计 1 字；括号外语翻译、△、数字、空白不计，中文动作说明保留'}">${en ? '英文剧本 · 按单词计数' : '含标点与英文词 · 不含外译'}</span>
       ${issues.map((i) => `<span class="chip warn">⚠ ${esc(i.text)}</span>`).join('')}
     </div>`;
 
@@ -205,7 +205,7 @@ function detailHTML(b, eps) {
   const c = state.caliber;
   const td = (k, n) => `<td class="${c === k ? 'cur' : ''}">${fmt(n)}</td>`;
   return `<details data-id="${b.id}" ${state.open.has(b.id) ? 'open' : ''}><summary>各集明细（${shown.length} 集）</summary>
-    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>集</th><th>标题</th><th>场数</th><th>整集原文</th><th>纯台词+动作</th><th>状态</th></tr></thead><tbody>
+    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>集</th><th>标题</th><th>场数</th><th>整集正文</th><th>纯台词+动作</th><th>状态</th></tr></thead><tbody>
     ${shown.map((e) => `<tr class="${e.v.kind !== 'ok' ? 'bad' : ''}"><td>第${e.no}集</td><td class="t">${esc(e.title)}</td><td>${e.scenes}</td>
       ${td('full', e.counts.full)}${td('pure', e.counts.pure)}
       <td>${e.v.kind === 'ok' ? '✓' : `<span class="tag">${e.v.label}${e.v.diff ? ' ' + fmt(e.v.diff) : ''}</span>`}</td></tr>`).join('')}
@@ -218,7 +218,7 @@ function rejectText(b) {
   const { eps, bad } = summarize(b);
   const en = b.result.lang === 'en';
   const unit = en ? '词' : '字';
-  const lines = [`《${b.name}》共 ${eps.length} 集，正文${en ? '英文单词数' : '字数（含标点与英文单词）'}要求 ${state.min}–${state.max}（${CALIBERS[state.caliber]}），以下 ${bad.length} 集不合格，请重申：`];
+  const lines = [`《${b.name}》共 ${eps.length} 集，正文${en ? '英文单词数' : '字数（含标点与夹杂英文，不含外语翻译与△）'}要求 ${state.min}–${state.max}（${CALIBERS[state.caliber]}），以下 ${bad.length} 集不合格，请重申：`];
   for (const e of bad) {
     const why = e.v.kind === 'empty' ? '空集，无正文' : e.v.kind === 'short' ? `${fmt(e.n)} ${unit}，少 ${fmt(e.v.diff)} ${unit}` : `${fmt(e.n)} ${unit}，多 ${fmt(e.v.diff)} ${unit}`;
     lines.push(`第${e.no}集${e.title ? '「' + e.title + '」' : ''}：${why}`);
@@ -240,7 +240,7 @@ async function copy(text) {
 
 function csvText() {
   // 中文剧本统计汉字、标点和英文词；英文剧本数单词。最后一列为 WPS 参考值。
-  const rows = [['剧本', '集', '标题', '场数', '计数方式', '整集原文', '纯台词+动作', `判定(${CALIBERS[state.caliber]} ${state.min}-${state.max})`, '差值', 'WPS字数(参考,含标点与英文)']];
+  const rows = [['剧本', '集', '标题', '场数', '计数方式', '整集正文(不含外译与△)', '纯台词+动作(不含外译与△)', `判定(${CALIBERS[state.caliber]} ${state.min}-${state.max})`, '差值', 'WPS字数(原文参考,可能含外译)']];
   for (const b of state.books.filter((x) => x.status === 'done')) {
     for (const e of summarize(b).eps) {
       rows.push([b.name, e.no, e.title, e.scenes, b.result.lang === 'en' ? '英文单词' : '汉字+标点+英文单词', e.counts.full, e.counts.pure, e.v.label, e.v.diff, e.words[state.caliber]]);

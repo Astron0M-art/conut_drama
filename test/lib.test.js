@@ -100,7 +100,7 @@ test('中文正文不会被长篇外语括号误判；纯台词统计排除场�
     '甲：你好。（Hello there, this long translated sentence must not change the language.）',
   ]);
   assert.strictEqual(r.lang, 'zh');
-  assert.deepStrictEqual(r.episodes[0].counts, { full: 28, clean: 13, pure: 5 });
+  assert.deepStrictEqual(r.episodes[0].counts, { full: 13, clean: 13, pure: 5 });
   assert.ok(r.episodes[0].words.full > r.episodes[0].words.clean);
 });
 
