@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>登录 · 字数统计打回编剧重申工作台</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='28' fill='none' stroke='%23d4231f' stroke-width='5'/%3E%3Ctext x='32' y='43' font-size='30' font-weight='900' text-anchor='middle' fill='%23d4231f' font-family='serif'%3E回%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/login.css">
+</head>
+<body class="login">
+<main class="stage">
+
+  <header class="brand">
+    <div class="stamp" id="stamp" aria-hidden="true"><span>打回</span></div>
+    <p class="kicker">DRAMA WORD AUDIT</p>
+    <h1>字数统计<br><em>打回编剧重申工作台</em></h1>
+    <p class="lead">逐集统计正文字数，不合格的一律标红打回。</p>
+  </header>
+
+  <div class="wrap">
+    <section class="login-card" id="card" aria-labelledby="title">
+      <h2 id="title">登录工作台</h2>
+      <form id="form" method="post" action="/api/login" novalidate>
+
+        <label class="field">
+          <span class="lbl">用户名</span>
+          <span class="ctl">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+            <input id="user" name="username" type="text" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" maxlength="64" required>
+          </span>
+        </label>
+
+        <label class="field">
+          <span class="lbl">密码</span>
+          <span class="ctl">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2.5"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>
+            <input id="pass" name="password" type="password" autocomplete="current-password" maxlength="128" required>
+            <button class="eye" id="eye" type="button" aria-label="显示密码" aria-pressed="false">
+              <svg class="show" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>
+              <svg class="hide" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3l18 18"/><path d="M10.6 6.1A9.8 9.8 0 0 1 12 6c6.4 0 10 6 10 6a17 17 0 0 1-3.2 3.9M6.4 7.6A16.6 16.6 0 0 0 2 12s3.6 6 10 6a9.8 9.8 0 0 0 4-.8"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>
+            </button>
+          </span>
+        </label>
+
+        <div class="opts">
+          <label class="check"><input id="remember" type="checkbox"><span>30 天内免登录</span></label>
+          <span class="caps" id="caps" hidden>大写锁定已开启</span>
+        </div>
+
+        <div class="msg" id="err" role="alert" hidden></div>
+        <noscript><div class="msg">登录页需要启用 JavaScript。</div></noscript>
+
+        <button class="go" id="go" type="submit"><span id="goText">登录</span><i class="sp" aria-hidden="true"></i></button>
+      </form>
+    </section>
+    <p class="foot">仅限内部使用 · 未经授权请勿访问</p>
+  </div>
+
+</main>
+<script src="/login.js"></script>
+</body>
+</html>

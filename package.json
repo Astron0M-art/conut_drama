@@ -1,0 +1,12 @@
+{
+  "name": "count-drama",
+  "version": "1.0.0",
+  "description": "字数统计·打回编剧重申工作台：批量上传剧本，按集统计正文字数，550–1000 之外标红",
+  "private": true,
+  "main": "server.js",
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test test/*.test.js"
+  }
+}

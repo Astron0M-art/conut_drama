@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>字数统计 · 打回编剧重申工作台</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='28' fill='none' stroke='%23d4231f' stroke-width='5'/%3E%3Ctext x='32' y='43' font-size='30' font-weight='900' text-anchor='middle' fill='%23d4231f' font-family='serif'%3E回%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<header class="hero">
+  <div class="hero-inner">
+    <div class="stamp" aria-hidden="true"><span>打回</span></div>
+    <div>
+      <p class="kicker">DRAMA WORD AUDIT</p>
+      <h1>字数统计<span class="sep">·</span><em>打回编剧重申工作台</em></h1>
+      <p class="lead">一次拖入最多 <b>10</b> 本剧本，逐集统计正文字数。<b class="rule" id="ruleText">550–1000</b> 字之外的集，一律标红打回。</p>
+    </div>
+    <button class="logout" id="logout" type="button" hidden>退出登录</button>
+  </div>
+</header>
+
+<main>
+  <section class="drop" id="drop" tabindex="0" role="button" aria-label="拖拽或点击上传剧本">
+    <div class="drop-icon" aria-hidden="true">
+      <svg viewBox="0 0 48 48" width="44" height="44" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M24 33V9M14 19l10-10 10 10"/><path d="M8 30v8a3 3 0 0 0 3 3h26a3 3 0 0 0 3-3v-8"/></svg>
+    </div>
+    <div class="drop-text"><strong>把剧本拖到这里</strong>，或点击选择文件</div>
+    <div class="drop-sub">支持 .docx / .txt / .md · 一次最多 10 本 · 单个 ≤ 30MB · 多本并发分析</div>
+    <input id="file" type="file" accept=".docx,.txt,.md" multiple hidden>
+  </section>
+
+  <aside class="note" role="note">
+    <span class="note-tag">字数规则</span>
+    <span>只数<b>汉字</b>（中文标点、英文、数字、空白都不算）；如果是<b>英文剧本</b>，则按<b>英文单词</b>计数。</span>
+  </aside>
+
+  <section class="bar" id="bar" hidden>
+    <div class="group cal">
+      <span class="label">统计口径</span>
+      <div class="seg" id="caliber" role="radiogroup">
+        <button data-v="full" role="radio" title="整集所有文字（含场景头、人物行）里的汉字；英文剧本则数英文单词">整集原文</button>
+        <button data-v="pure" role="radio" title="去掉场景头和「人物：」行，只数台词与动作">纯台词+动作</button>
+      </div>
+    </div>
+    <div class="group">
+      <span class="label">合格区间</span>
+      <div class="range"><input id="min" type="number" min="0" value="550" inputmode="numeric"><span>–</span><input id="max" type="number" min="1" value="1000" inputmode="numeric"><span class="unit">字</span></div>
+    </div>
+    <label class="check"><input id="onlyBad" type="checkbox"><span>只看需打回的集</span></label>
+    <div class="spacer"></div>
+    <button class="btn" id="exportBtn">导出 CSV</button>
+    <button class="btn ghost" id="clearBtn">清空</button>
+  </section>
+
+  <section class="summary" id="summary" hidden></section>
+  <div id="books"></div>
+</main>
+
+<footer>字数规则：中文剧本只数汉字（中文标点、英文、数字、空白都不算）；英文剧本按英文单词计数（≥2 个字母，数字与标点不计）。</footer>
+
+<div class="overlay" id="overlay"><div>松开鼠标，开始分析</div></div>
+<div class="toast" id="toast" role="status"></div>
+
+<script src="/app.js"></script>
+</body>
+</html>
