@@ -122,7 +122,8 @@ function draw() {
     <div class="card good"><div class="n">${fmt(eps - bad)}</div><div class="l">字数合格</div></div>
     <div class="card bad"><div class="n">${fmt(bad)}</div><div class="l">需打回编剧重申</div></div>`;
 
-  $('books').innerHTML = has ? state.books.map(bookHTML).join('') : '';
+  // 展示按添加顺序倒序，解析完成先后不会改变位置；上传队列仍保持原顺序。
+  $('books').innerHTML = has ? state.books.slice().reverse().map(bookHTML).join('') : '';
 }
 
 function bookHTML(b) {
