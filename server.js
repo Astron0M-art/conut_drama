@@ -13,7 +13,7 @@ const PORT = process.env.PORT === '0' ? 0 : Number(process.env.PORT) || 3000; //
 const HOST = process.env.HOST || '127.0.0.1';
 const MAX_FILE = 30 * 1024 * 1024; // 单文件上限
 const MAX_QUEUE = 64; // 排队中的解析任务上限，超出返回 503
-const MAX_PER_IP = 16; // 单 IP 同时在途请求
+const MAX_PER_IP = 24; // 单 IP 同时在途请求
 const TRUST_PROXY = process.env.TRUST_PROXY === '1'; // 在 nginx 后面时设为 1，按 X-Forwarded-For 区分访客
 const COOKIE = 'cd_session';
 const DAY = 24 * 3600;

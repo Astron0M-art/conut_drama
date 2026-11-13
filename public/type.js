@@ -3,7 +3,12 @@
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmt = (n) => n.toLocaleString('zh-CN');
+const MAX_BOOKS = 20;
+const CONCURRENCY = 20;
+const EXTS = ['.docx', '.txt', '.md'];
+// S 是「当前选中那一本」的视图；books 保存每本的状态
 const S = { name: '', paras: [], res: null, editing: -1, onlyBad: false, min: 550, max: 1000, caliber: 'full', busy: false };
+const books = []; let cur = null; let seq = 0;
 
 function toast(msg) { const t = $('toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('show'), 3000); }
 
@@ -15,25 +20,77 @@ async function call(url, opts) {
 }
 const postJSON = (url, body) => call(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 
-async function upload(file) {
-  S.busy = true; $('hint').hidden = true; toast('校验中…');
+function select(b) {
+  if (cur) { cur.paras = S.paras; cur.res = S.res; cur.onlyBad = S.onlyBad; }
+  cur = b;
+  S.name = b.name; S.paras = b.paras || []; S.res = b.res || null; S.editing = -1; S.onlyBad = !!b.onlyBad;
+  renderTabs();
+  if (b.status === 'done' && S.res) render(); else { $('stage').hidden = true; $('steps').hidden = true; }
+}
+
+function renderTabs() {
+  $('tabs').hidden = books.length === 0;
+  const label = { queued: ['排队', 'run'], running: ['校验中', 'run'], error: ['失败', 'bad'] };
+  $('tabs').innerHTML = (books.length > 1 ? `<span class="chip" style="align-self:center">共 ${books.length} 本 · 通过 <b>${books.filter((b) => b.res && b.res.format.ok).length}</b> · 待处理 <b>${books.filter((b) => b.status === 'done' && !b.res.format.ok).length}</b></span>` : '') + books.map((b) => {
+    const st = b.status === 'done' ? (b.res.format.ok ? ['通过', 'ok'] : [`${b.res.format.errors} 错`, 'bad']) : label[b.status];
+    return `<div class="tab ${b === cur ? 'cur' : ''}" data-a="tab" data-id="${b.id}" title="${esc(b.file.name)}"><span class="nm">${esc(b.name)}</span><span class="st ${st[1]}">${st[0]}</span><button class="x" data-a="rm" data-id="${b.id}" title="移除">×</button></div>`;
+  }).join('');
+}
+
+let running = 0;
+function pump() {
+  while (running < CONCURRENCY) {
+    const b = books.find((x) => x.status === 'queued');
+    if (!b) return;
+    b.status = 'running'; running++;
+    validateOne(b).finally(() => { running--; pump(); });
+  }
+}
+
+async function validateOne(b) {
+  renderTabs();
   try {
-    const r = await call('/api/validate', { method: 'POST', headers: { 'X-Filename': encodeURIComponent(file.name), 'Content-Type': 'application/octet-stream' }, body: file });
-    const d = await r.json();
-    S.name = d.name; S.paras = d.paragraphs; S.res = d; S.editing = -1;
-    render();
-    if (d.format.ok) setTimeout(() => $('count').scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
-  } catch (e) { toast(e.message === 'Failed to fetch' ? '无法连接服务器' : e.message); }
-  S.busy = false;
+    for (let attempt = 0; ; attempt++) {
+      const r = await fetch('/api/validate', { method: 'POST', headers: { 'X-Filename': encodeURIComponent(b.file.name), 'Content-Type': 'application/octet-stream' }, body: b.file });
+      if (r.status === 503 && attempt < 5) { await new Promise((x) => setTimeout(x, 700 * (attempt + 1))); continue; }
+      if (r.status === 401) { location.href = '/login?expired=1'; throw new Error('登录已过期'); }
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || `服务器返回 ${r.status}`);
+      b.name = d.name; b.paras = d.paragraphs; b.res = d; b.status = 'done';
+      break;
+    }
+  } catch (e) { b.status = 'error'; b.error = e.message === 'Failed to fetch' ? '无法连接服务器' : e.message; }
+  if (!cur) select(b); else if (b === cur) select(b); else renderTabs();
+  if (b === cur && b.status === 'done' && b.res.format.ok) setTimeout(() => $('count').scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
+  if (b === cur && b.status === 'error') toast(`《${b.name}》${b.error}`);
+}
+
+function addFiles(list) {
+  $('hint').hidden = true;
+  let skipped = 0; let over = 0; let dup = 0;
+  for (const f of [...list]) {
+    const ext = (f.name.match(/\.[^.]+$/) || [''])[0].toLowerCase();
+    if (!EXTS.includes(ext)) { skipped++; continue; }
+    if (books.some((b) => b.file.name === f.name && b.file.size === f.size)) { dup++; continue; }
+    if (books.length >= MAX_BOOKS) { over++; continue; }
+    books.push({ id: ++seq, file: f, name: f.name.replace(/\.[^.]+$/, ''), status: 'queued' });
+  }
+  const notes = [];
+  if (over) notes.push(`最多同时 ${MAX_BOOKS} 本，已忽略 ${over} 个`);
+  if (skipped) notes.push(`${skipped} 个文件格式不支持`);
+  if (dup) notes.push(`${dup} 个文件已在列表中`);
+  if (notes.length) toast(notes.join('；'));
+  renderTabs(); pump();
+  if (!cur && books.length) { /* 第一本校验完成后自动选中 */ }
 }
 
 async function recheck() {
   const d = await (await postJSON('/api/recheck', { name: S.name, paragraphs: S.paras })).json();
-  S.res = d; S.editing = -1; render();
+  S.res = d; S.editing = -1; if (cur) { cur.res = d; cur.paras = S.paras; } render(); renderTabs();
 }
 async function autofix() {
   const d = await (await postJSON('/api/fix', { name: S.name, paragraphs: S.paras })).json();
-  S.paras = d.paragraphs; S.res = d; S.editing = -1; render();
+  S.paras = d.paragraphs; S.res = d; S.editing = -1; if (cur) { cur.res = d; cur.paras = d.paragraphs; } render(); renderTabs();
   toast(`已自动修复 ${d.applied} 处${d.format.ok ? '，格式通过，已进入字数统计' : `，还剩 ${d.format.errors} 个错误需手动处理`}`);
 }
 async function download() {
@@ -105,6 +162,7 @@ function render() {
   $('side').innerHTML = `<h3>问题清单（${f.issues.length}）</h3>${f.ok && !f.issues.length ? '<p class="empty-hint" style="padding:12px 0">没有问题。</p>' : ''}${list(global)}${list(paraIssues.slice(0, cap))}${paraIssues.length > cap ? `<p class="ln">仅显示前 ${cap} 条，其余请在右侧文档中查看。</p>` : ''}`;
   $('paper').innerHTML = paperHTML();
   renderCount();
+  buildMinimap();
 }
 
 function verdict(n) {
@@ -195,6 +253,13 @@ document.addEventListener('click', (e) => {
     else if (a === 'addafter') { S.paras.splice(i + 1, 0, '△'); S.editing = i + 1; recheck(); }
     else if (a === 'cal') { S.caliber = btn.dataset.v; renderCount(); }
     else if (a === 'copy') copyReject();
+    else if (a === 'tab') { const b = books.find((x) => x.id === Number(btn.dataset.id)); if (b && b !== cur) select(b); }
+    else if (a === 'rm') {
+      e.stopPropagation();
+      const k = books.findIndex((x) => x.id === Number(btn.dataset.id)); if (k < 0) return;
+      const gone = books.splice(k, 1)[0];
+      if (gone === cur) { cur = null; books.length ? select(books[Math.min(k, books.length - 1)]) : (S.res = null, $('stage').hidden = true, $('steps').hidden = true, renderTabs()); } else renderTabs();
+    }
     return;
   }
   const row = e.target.closest('.paper .p[data-i]');
@@ -211,9 +276,61 @@ document.addEventListener('change', (e) => {
 const drop = $('drop'); const input = $('file');
 drop.addEventListener('click', () => input.click());
 drop.addEventListener('keydown', (e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), input.click()));
-input.addEventListener('change', () => { if (input.files[0]) upload(input.files[0]); input.value = ''; });
+input.addEventListener('change', () => { addFiles(input.files); input.value = ''; });
 window.addEventListener('dragover', (e) => e.preventDefault());
-window.addEventListener('drop', (e) => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) upload(f); });
+window.addEventListener('drop', (e) => { e.preventDefault(); addFiles(e.dataTransfer.files); });
 
 fetch('/api/me').then((r) => (r.ok ? r.json() : null)).then((me) => { if (me && me.auth) { $('logout').title = `当前账号：${me.user}`; $('logout').hidden = false; } }).catch(() => {});
 $('logout').addEventListener('click', async () => { try { await fetch('/api/logout', { method: 'POST' }); } finally { location.href = '/login'; } });
+
+/* ---------- 左侧缩略定位轴 ---------- */
+let mm = { y: [], h: 0 };
+function buildMinimap() {
+  const el = $('minimap'); if (!S.res) return;
+  const blocks = S.res.format.blocks; const n = blocks.length || 1;
+  const H = el.clientHeight || 400;
+  const unit = H / n;
+  const sev = (b) => { const it = b.issues.map((id) => S.res.format.issues.find((x) => x.id === id)).filter(Boolean); return it.some((x) => x.level === 'error') ? 'e' : it.length ? 'w' : ''; };
+  let html = '';
+  // 为避免上万个节点，按像素桶合并：同桶内取最严重的颜色
+  const buckets = Math.min(n, Math.max(1, Math.floor(H / 2)));
+  const rank = { '': 0, h: 1, ep: 1, w: 2, e: 3 };
+  const cls = new Array(buckets).fill('');
+  blocks.forEach((b, i) => { const k = Math.min(buckets - 1, Math.floor(i / n * buckets)); const c = sev(b) || (b.kind === 'h2' || b.kind === 'title' ? 'h' : b.kind === 'ep' ? 'ep' : ''); if (rank[c] > rank[cls[k]]) cls[k] = c; });
+  const bh = H / buckets;
+  cls.forEach((c, k) => { html += `<i class="mm ${c}" style="top:${(k * bh).toFixed(1)}px;height:${Math.max(2, bh - 0.5).toFixed(1)}px"></i>`; });
+  el.innerHTML = html + '<div class="view" id="mmView"></div><div class="tip" id="mmTip"></div>';
+  mm = { n, H };
+  syncMinimap();
+}
+function paraEl(i) { return $('p' + i); }
+function syncMinimap() {
+  const v = $('mmView'); const w = document.querySelector('.paper-wrap'); if (!v || !w || !mm.n) return;
+  const paper = $('paper'); const total = Math.max(1, paper.offsetHeight);
+  const top = w.scrollTop; const vh = w.clientHeight;
+  v.style.top = `${Math.max(0, (top / total) * mm.H)}px`;
+  v.style.height = `${Math.max(8, Math.min(mm.H, (vh / total) * mm.H))}px`;
+}
+function mmJump(clientY, smooth) {
+  const el = $('minimap'); const w = document.querySelector('.paper-wrap'); if (!w) return;
+  const r = el.getBoundingClientRect();
+  const ratio = Math.min(1, Math.max(0, (clientY - r.top) / r.height));
+  const paper = $('paper');
+  w.scrollTo({ top: ratio * paper.offsetHeight - w.clientHeight / 2, behavior: smooth ? 'smooth' : 'auto' });
+}
+(() => {
+  const el = $('minimap'); let drag = false;
+  el.addEventListener('pointerdown', (e) => { drag = true; el.setPointerCapture(e.pointerId); mmJump(e.clientY, false); });
+  el.addEventListener('pointermove', (e) => {
+    if (drag) mmJump(e.clientY, false);
+    const tip = $('mmTip'); if (!tip || !S.res) return;
+    const r = el.getBoundingClientRect(); const ratio = Math.min(1, Math.max(0, (e.clientY - r.top) / r.height));
+    const i = Math.min(S.res.format.blocks.length - 1, Math.floor(ratio * S.res.format.blocks.length));
+    let label = `第 ${i + 1} 行`;
+    for (let k = i; k >= 0; k--) { const b = S.res.format.blocks[k]; if (b.kind === 'ep') { label = b.text; break; } if (b.kind === 'h2') { label = b.text; break; } }
+    tip.textContent = label; tip.style.top = `${e.clientY - r.top}px`;
+  });
+  el.addEventListener('pointerup', () => { drag = false; });
+  document.querySelector('.paper-wrap').addEventListener('scroll', syncMinimap, { passive: true });
+  window.addEventListener('resize', () => { if (S.res) buildMinimap(); });
+})();

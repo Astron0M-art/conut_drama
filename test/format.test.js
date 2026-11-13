@@ -48,27 +48,46 @@ test('缺集：第1集后直接第3集', () => {
   assert.ok(codes(p).includes('episode-missing'));
 });
 
-test('场次号不连续、集标题带标题、半角冒号、△后空格 → 都能被一键修复，结果通过', () => {
+test('场次号不连续、集标题带标题、半角冒号、△后空格：只是提示，不拦截，且都能一键修复', () => {
   const p = ref();
   p[idx(p, /^第2集$/)] = '第2集 废料堆奇遇';
   p[idx(p, /^2-2 /)] = p[idx(p, /^2-2 /)].replace('2-2', '2-3');
-  p[idx(p, /^短剧类型：/)] = '短剧类型:AI短剧';
   p[idx(p, /^△黑铁被刨出/)] = '△ 黑铁被刨出半截';
-  assert.ok(codes(p).length >= 3);
+  const r = check(p);
+  assert.strictEqual(r.ok, true);
+  assert.ok(r.warns >= 3 && r.fixable >= 3);
   const f = autoFix(p);
-  assert.strictEqual(f.report.ok, true, JSON.stringify(f.report.issues.filter((x) => x.level === 'error')));
+  assert.strictEqual(f.report.warns, 0);
   assert.ok(f.paras.includes('第2集') && f.paras.some((t) => t.startsWith('2-2 ')));
 });
 
-test('场次头缺人物行 / 未识别的正文行 / 缺章节 / 缺字段', () => {
+test('场次头缺人物行 / 未识别的正文行 / 梗概缺字段 / 人物小传格式乱：只做提示，不影响统计', () => {
   let p = ref(); p.splice(idx(p, /^人物：陆铁 赵骁/), 1);
-  assert.ok(codes(p).includes('cast-missing'));
+  let r = check(p); assert.ok(r.ok && r.issues.some((i) => i.code === 'cast-missing' && i.level === 'warn'));
   p = ref(); p.splice(idx(p, /^△巨大熔炉/), 0, '这是一句没有标记的旁白。');
-  assert.ok(codes(p).includes('body-line-unknown'));
-  p = ref(); p.splice(idx(p, /^故事梗概$/), 1);
-  assert.ok(codes(p).includes('section-missing'));
+  r = check(p); assert.ok(r.ok && r.issues.some((i) => i.code === 'body-line-unknown' && i.level === 'warn'));
   p = ref(); p.splice(idx(p, /^核心亮点：/), 1);
-  assert.ok(codes(p).includes('synopsis-missing-field'));
+  assert.strictEqual(check(p).issues.length, 0); // 梗概缺字段不再校验
+  p = ref(); p.splice(idx(p, /^故事梗概$/), 1, '一些乱七八糟的东西');
+  assert.strictEqual(check(p).ok, true);
+});
+
+test('只有影响分集的才是错误：缺「正文内容」标题、缺集标题、缺集、集号重复/倒退、空集', () => {
+  let p = ref(); p.splice(idx(p, /^正文内容$/), 1);
+  assert.ok(codes(p).includes('section-missing'));
+  p = ref(); p.splice(idx(p, /^第2集$/), 1);
+  assert.ok(codes(p).includes('episode-heading-missing'));
+  p = ref(); const i = idx(p, /^第2集$/); p.splice(i, idx(p, /^第3集$/) - i);
+  assert.ok(codes(p).includes('episode-missing'));
+});
+
+test('字数只统计「正文内容」之后：前面的梗概、人物、大纲乱写也不影响各集字数', () => {
+  const base = validateParagraphs(ref()).analysis.episodes.map((e) => e.counts.full);
+  const p = ref(); const b = idx(p, /^正文内容$/);
+  p.splice(1, b - 1, '随便写的一大段无关文字'.repeat(300), '第99集 假的集标题', '99-1 日 外 假场次');
+  const r = validateParagraphs(p);
+  assert.strictEqual(r.format.ok, true);
+  assert.deepStrictEqual(r.analysis.episodes.map((e) => e.counts.full), base);
 });
 
 test('场次头内/外与时间颠倒、「内/外」合写可接受', () => {

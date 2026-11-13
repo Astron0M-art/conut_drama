@@ -24,15 +24,18 @@
 
 <main>
   <section class="drop" id="drop" tabindex="0" role="button" aria-label="拖拽或点击上传剧本">
-    <div class="drop-text"><strong>把剧本拖到这里</strong>，或点击选择文件（.docx / .txt / .md，一次一本）</div>
-    <input id="file" type="file" accept=".docx,.txt,.md" hidden>
+    <div class="drop-text"><strong>把剧本拖到这里</strong>，或点击选择文件</div>
+    <div class="drop-sub">支持 .docx / .txt / .md · 一次最多 20 本，同时并发校验 · 单个 ≤ 30MB</div>
+    <input id="file" type="file" accept=".docx,.txt,.md" multiple hidden>
   </section>
+  <section class="tabs" id="tabs" hidden></section>
   <ol class="steps" id="steps" hidden>
     <li id="st1"><i>1</i>格式校验</li><li class="arrow">→</li><li id="st2"><i>2</i>字数统计</li>
   </ol>
   <div id="stage" hidden>
     <section class="statusbar" id="statusbar"></section>
     <div class="cols">
+      <nav class="minimap" id="minimap" aria-label="缩略定位"></nav>
       <aside class="side" id="side"></aside>
       <section class="paper-wrap"><div class="paper" id="paper"></div></section>
     </div>
