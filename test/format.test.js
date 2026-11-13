@@ -24,23 +24,6 @@ test('格式不通过时不统计字数', () => {
   assert.strictEqual(r.analysis, undefined);
 });
 
-test('第N集有标题却没有 N-1 场次，而是 N 的尾数（21 集写成 2-1）', () => {
-  const p = ref();
-  const i = idx(p, /^第3集$/); p.splice(i, 0, '第21集'); // 模拟：第 21 集标题下接 3-1
-  const j = p.findIndex((t) => /^3-1 /.test(t));
-  p[j] = p[j].replace(/^3-1/, '1-1');
-  const e = check(p).issues.find((x) => x.code === 'scene-episode-mismatch' && x.para === j);
-  assert.ok(e, '应报场次集号不符');
-});
-
-test('缺少第 N 集标题：场次从 N-1 开始但没有集标题', () => {
-  const p = ref(); p.splice(idx(p, /^第2集$/), 1);
-  const r = check(p);
-  const e = r.issues.find((x) => x.code === 'episode-heading-missing');
-  assert.ok(e && e.fixable);
-  assert.strictEqual(autoFix(p).report.ok, true);
-});
-
 test('缺集：第1集后直接第3集', () => {
   const p = ref(); const i = idx(p, /^第2集$/);
   const end = idx(p, /^第3集$/);
@@ -48,40 +31,43 @@ test('缺集：第1集后直接第3集', () => {
   assert.ok(codes(p).includes('episode-missing'));
 });
 
-test('场次号不连续、集标题带标题、半角冒号：只是提示，不拦截，且都能一键修复；△后空格直接放过', () => {
+test('版式类问题一律放过（无提示、不拦截）：场次号不连续、集标题带标题、半角冒号、△后空格、缺人物行、未识别行、【闪回】、梗概/人物小传乱写', () => {
   const p = ref();
   p[idx(p, /^第2集$/)] = '第2集 废料堆奇遇';
   p[idx(p, /^2-2 /)] = p[idx(p, /^2-2 /)].replace('2-2', '2-3');
   p[idx(p, /^△黑铁被刨出/)] = '△ 黑铁被刨出半截';
+  p[idx(p, /^短剧类型：/)] = '短剧类型:AI短剧';
+  p.splice(idx(p, /^人物：陆铁 赵骁/), 1);
+  p.splice(idx(p, /^△巨大熔炉/), 0, '没有写△的一行描写', '【闪回】', '（中：独立成行的译文）');
+  p.splice(idx(p, /^故事梗概$/), 1, '乱写的梗概');
   const r = check(p);
   assert.strictEqual(r.ok, true);
-  assert.ok(!r.issues.some((i) => i.para === idx(p, /^△ 黑铁被刨出/)), '△后空格不应有任何提示');
-  assert.ok(r.warns >= 2 && r.fixable >= 2);
-  const f = autoFix(p);
-  assert.strictEqual(f.report.warns, 0);
-  assert.ok(f.paras.includes('第2集') && f.paras.some((t) => t.startsWith('2-2 ')));
+  assert.strictEqual(r.issues.length, 0);
 });
 
-test('场次头缺人物行只做提示；未识别的正文行、【闪回】标记行直接放过（无提示）；梗概/人物小传乱不影响', () => {
-  let p = ref(); p.splice(idx(p, /^人物：陆铁 赵骁/), 1);
-  let r = check(p); assert.ok(r.ok && r.issues.some((i) => i.code === 'cast-missing' && i.level === 'warn'));
-  p = ref(); p.splice(idx(p, /^△巨大熔炉/), 0, '这是一句没有标记的旁白。');
-  r = check(p); assert.ok(r.ok && r.issues.length === 0);
-  p = ref(); p.splice(idx(p, /^△巨大熔炉/), 0, '【闪回结束】岑书禾脊背挺拔，神色没有半分退缩。', '【闪回】');
-  r = check(p); assert.ok(r.ok && r.issues.length === 0);
-  p = ref(); p.splice(idx(p, /^核心亮点：/), 1);
-  assert.strictEqual(check(p).issues.length, 0); // 梗概缺字段不再校验
-  p = ref(); p.splice(idx(p, /^故事梗概$/), 1, '一些乱七八糟的东西');
-  assert.strictEqual(check(p).ok, true);
+test('场次头地点带括号（如 ICU）、内/外合写、内外与时间颠倒：都放过', () => {
+  for (const head of ['1-1 晨 内 重症监护室（ICU）', '1-1 夜 内/外 炼器堂', '1-1 外 日 炼器堂-后院', '1-1 日 外 炼器堂 (Forge Yard)']) {
+    const p = ref(); p[idx(p, /^1-1 /)] = head;
+    assert.strictEqual(check(p).issues.length, 0, head);
+  }
 });
 
-test('只有影响分集的才是错误：缺「正文内容」标题、缺集标题、缺集、集号重复/倒退、空集', () => {
+test('只有「统计器分不出集/某集为空」才拦截：缺「正文内容」标题、缺集、集号重复/倒退、空集', () => {
   let p = ref(); p.splice(idx(p, /^正文内容$/), 1);
   assert.ok(codes(p).includes('section-missing'));
-  p = ref(); p.splice(idx(p, /^第2集$/), 1);
-  assert.ok(codes(p).includes('episode-heading-missing'));
   p = ref(); const i = idx(p, /^第2集$/); p.splice(i, idx(p, /^第3集$/) - i);
   assert.ok(codes(p).includes('episode-missing'));
+  p = ref(); const j = idx(p, /^第2集$/); p.splice(j + 1, idx(p, /^第3集$/) - j - 1); // 第2集只剩标题
+  assert.ok(codes(p).includes('episode-empty'));
+});
+
+test('集标题与场次前缀对不上（第N集下写 0-1/3-1）、或只有场次号没有集标题：统计器能分集，放过', () => {
+  let p = ref(); p[idx(p, /^2-1 /)] = p[idx(p, /^2-1 /)].replace(/^2-1/, '0-1');
+  assert.strictEqual(check(p).ok, true);
+  p = ref(); p.splice(idx(p, /^第2集$/), 1);
+  const r = validateParagraphs(p);
+  assert.strictEqual(r.format.ok, true);
+  assert.strictEqual(r.analysis.episodes.length, 3); // 靠 2-1 场次仍识别出第2集
 });
 
 test('字数只统计「正文内容」之后：前面的梗概、人物、大纲乱写也不影响各集字数', () => {
@@ -93,12 +79,6 @@ test('字数只统计「正文内容」之后：前面的梗概、人物、大�
   assert.deepStrictEqual(r.analysis.episodes.map((e) => e.counts.full), base);
 });
 
-test('场次头内/外与时间颠倒、「内/外」合写可接受', () => {
-  const p = ref(); p[idx(p, /^1-1 /)] = '1-1 外 日 炼器堂-后院';
-  const f = autoFix(p); assert.ok(f.paras.includes('1-1 日 外 炼器堂-后院'));
-  const q = ref(); q[idx(q, /^1-1 /)] = '1-1 夜 内/外 炼器堂';
-  assert.ok(!codes(q).includes('scene-format'));
-});
 
 test('粗纲/集纲与正文集数不一致不算错（只看正文）', () => {
   assert.strictEqual(check(ref()).ok, true);
