@@ -135,10 +135,10 @@ test('框选字数：选中整集 = 该集统计；与逐集同口径（排除�
   assert.strictEqual(countSelection([], 'zh').full, 0);
 });
 
-test('会改变字数的问题必须拦截：独立成行的括号翻译；可一键删除后通过', () => {
-  const p = ref(); p.splice(idx(p, /^△巨大熔炉/), 0, '（英：The furnace roared.）');
+test('独立成行的「（中：…）」译文行：保留，不提示不报错，一键修复也不删除', () => {
+  const t = '（中：编号 C-0902号受试体：测试同理心崩溃极限。成年即刻执行分子粉碎销毁。）';
+  const p = ref(); p.splice(idx(p, /^△巨大熔炉/), 0, '【OVERRIDE： HUMAN SOVEREIGNTY】', t);
   const r = check(p);
-  assert.strictEqual(r.ok, false);
-  assert.ok(r.issues.some((i) => i.code === 'translation-line' && i.level === 'error' && i.fixable));
-  assert.strictEqual(autoFix(p).report.ok, true);
+  assert.ok(r.ok && r.issues.length === 0);
+  assert.ok(autoFix(p).paras.includes(t));
 });
