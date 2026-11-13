@@ -7,6 +7,7 @@ const os = require('os');
 const path = require('path');
 const { Pool } = require('./lib/pool');
 const { createAuth, Throttle } = require('./lib/auth');
+const fmt = require('./lib/format');
 
 const PORT = process.env.PORT === '0' ? 0 : Number(process.env.PORT) || 3000; // PORT=0：随机空闲端口（测试用）
 const HOST = process.env.HOST || '127.0.0.1';
@@ -42,6 +43,8 @@ for (const f of fs.readdirSync(PUBLIC)) statics.set('/' + f, f);
 statics.set('/', 'index.html');
 statics.set('/login', 'login.html');
 statics.delete('/login.html');
+statics.set('/type', 'type.html');
+statics.delete('/type.html');
 const OPEN = new Set(['/login', '/login.css', '/login.js', '/style.css']); // 登录前就要能打开的
 
 const SECURITY = {
@@ -134,6 +137,47 @@ function handleLogout(req, res) {
   send(res, 200, { ok: true }, undefined, { 'Cache-Control': 'no-store', 'Set-Cookie': sessionCookie(req, '', 0) });
 }
 
+// 校验链路：upload（文件 → 校验 → 通过才统计）、recheck / fix / export（JSON 段落数组，用于页面内修改后重验）
+async function handleFormat(req, res, kind) {
+  const ip = clientIp(req);
+  if ((inflight.get(ip) || 0) >= MAX_PER_IP || pool.pending >= MAX_QUEUE) {
+    return send(res, 503, { error: '服务繁忙，请稍后重试' }, undefined, { 'Retry-After': '3' });
+  }
+  inflight.set(ip, (inflight.get(ip) || 0) + 1);
+  try {
+    if (kind === 'validate') {
+      let name = '';
+      try { name = decodeURIComponent(req.headers['x-filename'] || ''); } catch { /* 留空 */ }
+      if (!name) return send(res, 400, { error: '缺少文件名' });
+      const buf = await readBody(req, MAX_FILE, '文件超过 30MB');
+      if (!buf.length) return send(res, 400, { error: '文件内容为空' });
+      return send(res, 200, await pool.run(buf, name, 'validate'));
+    }
+    let body;
+    try { body = JSON.parse((await readBody(req, MAX_FILE, '请求体过大')).toString() || 'null'); } catch (e) {
+      return send(res, e.status || 400, { error: e.status ? e.message : '请求格式错误' });
+    }
+    if (!body || !Array.isArray(body.paragraphs) || body.paragraphs.some((x) => typeof x !== 'string') || body.paragraphs.length > 200000) {
+      return send(res, 400, { error: '缺少 paragraphs（字符串数组）' });
+    }
+    const name = String(body.name || '').slice(0, 200);
+    if (kind === 'recheck') return send(res, 200, fmt.validateParagraphs(body.paragraphs, name));
+    if (kind === 'fix') return send(res, 200, fmt.fixParagraphs(body.paragraphs, name));
+    // export：只有通过校验的稿件才能导出标准 docx
+    const report = fmt.check(body.paragraphs);
+    if (!report.ok) return send(res, 422, { error: '格式校验未通过，不能导出', errors: report.errors });
+    const file = encodeURIComponent(`${name || '剧本'}_标准格式.docx`);
+    return send(res, 200, fmt.exportDocx(body.paragraphs), 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', { 'Content-Disposition': `attachment; filename*=UTF-8''${file}` });
+  } catch (e) {
+    const status = e.status || 400;
+    if (status === 413) res.once('finish', () => req.destroy());
+    send(res, status, { error: e.message || '处理失败' }, undefined, status === 413 ? { Connection: 'close' } : {});
+  } finally {
+    const n = (inflight.get(ip) || 1) - 1;
+    n ? inflight.set(ip, n) : inflight.delete(ip);
+  }
+}
+
 async function handleAnalyze(req, res) {
   const ip = clientIp(req);
   if ((inflight.get(ip) || 0) >= MAX_PER_IP || pool.pending >= MAX_QUEUE) {
@@ -170,10 +214,11 @@ function handle(req, res) {
 
   if (!authed(req)) {
     // 页面跳登录页；接口和其他资源直接 401
-    return get && (url === '/' || url === '/index.html') ? redirect(res, '/login') : send(res, 401, { error: '未登录' });
+    return get && (url === '/' || url === '/index.html' || url === '/type') ? redirect(res, '/login') : send(res, 401, { error: '未登录' });
   }
 
   if (req.method === 'POST' && url === '/api/analyze') return handleAnalyze(req, res);
+  if (req.method === 'POST' && /^\/api\/(validate|recheck|fix|export)$/.test(url)) return handleFormat(req, res, url.slice(5));
   if (get && url === '/api/me') return send(res, 200, { auth: auth.enabled, user: auth.enabled ? auth.user : null }, undefined, { 'Cache-Control': 'no-store' });
   if (get && url === '/healthz') return send(res, 200, { ok: true, pending: pool.pending });
   if (get && statics.has(url)) return serveStatic(res, url);

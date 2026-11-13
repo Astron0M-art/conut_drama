@@ -67,6 +67,7 @@ async function analyze(book) {
       if (res.status === 401) { location.href = '/login?expired=1'; throw new Error('登录已过期，正在跳转…'); }
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || `服务器返回 ${res.status}`);
+      if (data.formatFailed) { book.status = 'error'; book.fmt = data; book.error = ''; return; }
       book.result = data;
       book.status = 'done';
       return;
@@ -139,7 +140,7 @@ function bookHTML(b) {
   }
   if (b.status === 'error') {
     return `<article class="book has-bad">${head(`<button class="btn sm" data-act="retry" data-id="${b.id}">重试</button>`)}
-      <div class="state err"><b>解析失败</b> ${esc(b.error)}</div></article>`;
+      ${b.fmt ? `<div class="state err"><b>格式校验未通过（${b.fmt.errors} 处错误${b.fmt.fixable ? `，其中 ${b.fmt.fixable} 处可自动修复` : ''}），已暂停字数统计</b><br>${b.fmt.top.map((t) => esc(t.message)).join('<br>')}<br><a href="/type">到格式校验页修改后再统计 →</a></div>` : `<div class="state err"><b>解析失败</b> ${esc(b.error)}</div>`}</article>`;
   }
 
   const { eps, bad, avg } = summarize(b);

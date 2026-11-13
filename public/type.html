@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>格式校验 · 字数统计前置关卡</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='28' fill='none' stroke='%23d4231f' stroke-width='5'/%3E%3Ctext x='32' y='43' font-size='30' font-weight='900' text-anchor='middle' fill='%23d4231f' font-family='serif'%3E格%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/type.css">
+</head>
+<body>
+<header class="hero">
+  <div class="hero-inner">
+    <div class="stamp" aria-hidden="true"><span>校验</span></div>
+    <div>
+      <p class="kicker">FORMAT GATE · WORD AUDIT</p>
+      <h1>格式校验<span class="sep">·</span><em>通过后统计字数</em></h1>
+      <p class="lead">先对照标准稿校验格式，<b>错误行标红并说明原因</b>，可在页面里直接改或一键修复；<b>格式通过</b>后才出逐集字数，<b class="rule" id="ruleText">550–1000</b> 之外标红打回。</p>
+    </div>
+    <a class="logout" href="/" style="text-decoration:none;right:120px">批量统计页</a>
+    <button class="logout" id="logout" type="button" hidden>退出登录</button>
+  </div>
+</header>
+
+<main>
+  <section class="drop" id="drop" tabindex="0" role="button" aria-label="拖拽或点击上传剧本">
+    <div class="drop-text"><strong>把剧本拖到这里</strong>，或点击选择文件（.docx / .txt / .md，一次一本）</div>
+    <input id="file" type="file" accept=".docx,.txt,.md" hidden>
+  </section>
+  <ol class="steps" id="steps" hidden>
+    <li id="st1"><i>1</i>格式校验</li><li class="arrow">→</li><li id="st2"><i>2</i>字数统计</li>
+  </ol>
+  <div id="stage" hidden>
+    <section class="statusbar" id="statusbar"></section>
+    <div class="cols">
+      <aside class="side" id="side"></aside>
+      <section class="paper-wrap"><div class="paper" id="paper"></div></section>
+    </div>
+    <section id="count"></section>
+  </div>
+  <p class="empty-hint" id="hint">标准格式：《剧名》→ 故事梗概 → 人物小传 → 分集大纲·粗纲 → 分集大纲·集纲 → 正文内容（第N集 / N-M 场次头 / 人物 / △动作 / 台词）</p>
+</main>
+<footer>字数统计只在格式校验通过后进行。中文汉字、标点各计 1 字，夹杂英文每词计 1 字；括号外语翻译、△、数字、空白不计。</footer>
+<div class="toast" id="toast" role="status"></div>
+<script src="/type.js"></script>
+</body>
+</html>

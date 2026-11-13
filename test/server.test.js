@@ -70,7 +70,22 @@ test('登录：错误密码 401；正确密码发 HttpOnly 会话 Cookie，凭�
 
   const r = await fetch(base + '/api/analyze', { method: 'POST', headers: { Cookie: cookie, 'X-Filename': 'a.txt' }, body: '第1集\n△你好。\n' });
   assert.strictEqual(r.status, 200);
-  assert.strictEqual((await r.json()).episodes.length, 1);
+  const blocked = await r.json();
+  assert.strictEqual(blocked.formatFailed, true); // 格式不通过：不统计字数
+  assert.ok(blocked.top.length > 0 && !blocked.episodes);
+
+  const ref = require('node:fs').readFileSync(path.join(__dirname, 'fixtures', 'reference.docx'));
+  const okRes = await fetch(base + '/api/analyze', { method: 'POST', headers: { Cookie: cookie, 'X-Filename': encodeURIComponent('ref.docx') }, body: ref });
+  assert.strictEqual((await okRes.json()).episodes.length, 3); // 格式通过：给出统计
+
+  const v = await fetch(base + '/api/validate', { method: 'POST', headers: { Cookie: cookie, 'X-Filename': encodeURIComponent('ref.docx') }, body: ref });
+  const vj = await v.json();
+  assert.strictEqual(vj.format.ok, true);
+  assert.strictEqual(vj.analysis.episodes.length, 3);
+  const bad = await fetch(base + '/api/export', { method: 'POST', headers: { Cookie: cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'x', paragraphs: ['乱写'] }) });
+  assert.strictEqual(bad.status, 422); // 未通过不能导出
+  const good = await fetch(base + '/api/export', { method: 'POST', headers: { Cookie: cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'x', paragraphs: vj.paragraphs }) });
+  assert.strictEqual(good.status, 200);
 
   assert.strictEqual((await get('/', cookie.slice(0, -2) + 'xx')).status, 302); // 篡改签名
 
