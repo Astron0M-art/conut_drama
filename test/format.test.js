@@ -61,13 +61,28 @@ test('只有「统计器分不出集/某集为空」才拦截：缺「正文内�
   assert.ok(codes(p).includes('episode-empty'));
 });
 
-test('集标题与场次前缀对不上（第N集下写 0-1/3-1）、或只有场次号没有集标题：统计器能分集，放过', () => {
-  let p = ref(); p[idx(p, /^2-1 /)] = p[idx(p, /^2-1 /)].replace(/^2-1/, '0-1');
-  assert.strictEqual(check(p).ok, true);
-  p = ref(); p.splice(idx(p, /^第2集$/), 1);
-  const r = validateParagraphs(p);
-  assert.strictEqual(r.format.ok, true);
-  assert.strictEqual(r.analysis.episodes.length, 3); // 靠 2-1 场次仍识别出第2集
+test('集号写错（第N集下写 0-1/3-1…）必须拦截，一键修复为所在集的集号（第13集下 3-1 → 13-1）', () => {
+  const p = ref(); const j = idx(p, /^2-1 /);
+  p[j] = p[j].replace(/^2-1/, '0-1');
+  const e = check(p).issues.find((x) => x.code === 'scene-episode-mismatch' && x.para === j);
+  assert.ok(e && e.fixable && e.fix.text.startsWith('2-1 '), '应报错并给出 2-1');
+  assert.strictEqual(autoFix(p).report.ok, true);
+  // 第13集（把第3集改号）下面全是 3-x，修复为 13-x
+  const q = ref(); q[idx(q, /^第3集$/)] = '第13集';
+  q[idx(q, /^第2集$/)] = '第12集'; q.forEach((t, i) => { if (/^2-\d /.test(t)) q[i] = t.replace(/^2-/, '12-'); });
+  const f = autoFix(q);
+  assert.ok(f.paras.some((t) => /^13-1 /.test(t)) && !f.paras.some((t) => /^3-\d /.test(t)));
+});
+
+test('只有场次号（2-1）、没有「第2集」标题：必须拦截，可一键补上标题后通过', () => {
+  const p = ref(); p.splice(idx(p, /^第2集$/), 1);
+  const r = check(p);
+  assert.strictEqual(r.ok, false);
+  const e = r.issues.find((x) => x.code === 'episode-heading-missing');
+  assert.ok(e && e.fixable && e.fix.text === '第2集');
+  const f = autoFix(p);
+  assert.strictEqual(f.report.ok, true);
+  assert.ok(f.paras.includes('第2集'));
 });
 
 test('字数只统计「正文内容」之后：前面的梗概、人物、大纲乱写也不影响各集字数', () => {
