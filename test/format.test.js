@@ -62,11 +62,13 @@ test('场次号不连续、集标题带标题、半角冒号：只是提示，�
   assert.ok(f.paras.includes('第2集') && f.paras.some((t) => t.startsWith('2-2 ')));
 });
 
-test('场次头缺人物行 / 未识别的正文行 / 梗概缺字段 / 人物小传格式乱：只做提示，不影响统计', () => {
+test('场次头缺人物行只做提示；未识别的正文行、【闪回】标记行直接放过（无提示）；梗概/人物小传乱不影响', () => {
   let p = ref(); p.splice(idx(p, /^人物：陆铁 赵骁/), 1);
   let r = check(p); assert.ok(r.ok && r.issues.some((i) => i.code === 'cast-missing' && i.level === 'warn'));
   p = ref(); p.splice(idx(p, /^△巨大熔炉/), 0, '这是一句没有标记的旁白。');
-  r = check(p); assert.ok(r.ok && r.issues.some((i) => i.code === 'body-line-unknown' && i.level === 'warn'));
+  r = check(p); assert.ok(r.ok && r.issues.length === 0);
+  p = ref(); p.splice(idx(p, /^△巨大熔炉/), 0, '【闪回结束】岑书禾脊背挺拔，神色没有半分退缩。', '【闪回】');
+  r = check(p); assert.ok(r.ok && r.issues.length === 0);
   p = ref(); p.splice(idx(p, /^核心亮点：/), 1);
   assert.strictEqual(check(p).issues.length, 0); // 梗概缺字段不再校验
   p = ref(); p.splice(idx(p, /^故事梗概$/), 1, '一些乱七八糟的东西');
