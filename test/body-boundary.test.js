@@ -235,3 +235,18 @@ test('DOCX标题样式与普通段落重复同集时忽略分页空段且只统�
   assert.deepEqual(result.episodes[0].counts, { full: 14, clean: 14, pure: 5 });
   assert.equal(result.issues.some((issue) => issue.type === 'dup'), false);
 });
+
+test('显式集标题优先于错误或沿用的场次前缀，不生成第0集或空集', () => {
+  const result = analyzeParagraphs([
+    '剧本正文',
+    '第13集 金盏花公主', '3-1 日 内 工坊', '甲：第十三集正文。',
+    '第20集 债务构陷', '0-1 夜 内 律所', '甲：第一场。', '20-2 晨 内 办公室', '乙：第二场。',
+    '第38集 铁证如山', '8-1 夜 内 法庭', '甲：第三十八集正文。',
+    '第40集 五方归契', '0-1 日 外 台阶', '甲：开场。', '40-2 日 内 车内', '乙：继续。', '0-4 日 内 堂屋', '丙：结尾。',
+  ]);
+  assert.deepEqual(result.episodes.map((episode) => episode.no), [13, 20, 38, 40]);
+  assert.deepEqual(result.episodes.map((episode) => episode.scenes), [1, 2, 1, 3]);
+  assert.equal(result.episodes.some((episode) => episode.no === 0), false);
+  assert.equal(result.issues.some((issue) => /重复/.test(issue.text)), false);
+  assert.ok(result.episodes.every((episode) => episode.paragraphs > 0));
+});
