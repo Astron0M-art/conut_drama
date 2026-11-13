@@ -161,6 +161,7 @@ async function handleFormat(req, res, kind) {
       return send(res, 400, { error: '缺少 paragraphs（字符串数组）' });
     }
     const name = String(body.name || '').slice(0, 200);
+    if (kind === 'count') return send(res, 200, fmt.countSelection(body.paragraphs, body.lang === 'en' ? 'en' : 'zh'));
     if (kind === 'recheck') return send(res, 200, fmt.validateParagraphs(body.paragraphs, name));
     if (kind === 'fix') return send(res, 200, fmt.fixParagraphs(body.paragraphs, name));
     // export：只有通过校验的稿件才能导出标准 docx
@@ -218,7 +219,7 @@ function handle(req, res) {
   }
 
   if (req.method === 'POST' && url === '/api/analyze') return handleAnalyze(req, res);
-  if (req.method === 'POST' && /^\/api\/(validate|recheck|fix|export)$/.test(url)) return handleFormat(req, res, url.slice(5));
+  if (req.method === 'POST' && /^\/api\/(validate|recheck|fix|export|count)$/.test(url)) return handleFormat(req, res, url.slice(5));
   if (get && url === '/api/me') return send(res, 200, { auth: auth.enabled, user: auth.enabled ? auth.user : null }, undefined, { 'Cache-Control': 'no-store' });
   if (get && url === '/healthz') return send(res, 200, { ok: true, pending: pool.pending });
   if (get && statics.has(url)) return serveStatic(res, url);

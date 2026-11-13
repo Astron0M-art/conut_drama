@@ -118,3 +118,24 @@ test('导出保持参考稿版式：二级标题样式 3、书名样式 2 居中
   const sig = (x) => (x.match(/<w:p(?:\s[^>]*)?\/>|<w:p(?:\s[^>]*)?>[\s\S]*?<\/w:p>/g) || []).map((p) => `${(/pStyle w:val="(\d)"/.exec(p) || [])[1] || '-'}${/<w:jc w:val="center"/.test(p) ? 'c' : ''}${/\/>$/.test(p) && !/<\/w:p>/.test(p) ? 'E' : ''}${/<w:b\/>/.test(p) ? 'B' : ''}`).join(',');
   assert.strictEqual(sig(xml), sig(refXml));
 });
+
+test('框选字数：选中整集 = 该集统计；与逐集同口径（排除外译与△），空选为 0', () => {
+  const { countSelection } = require('../lib/episodes');
+  const p = ref(); const r = validateParagraphs(p);
+  const eps = r.format.blocks.filter((b) => b.kind === 'ep').map((b) => b.para);
+  const body = p.slice(eps[0] + 1, eps[1]);
+  const c = countSelection(body, 'zh');
+  assert.strictEqual(c.full, r.analysis.episodes[0].counts.full);
+  assert.strictEqual(c.pure, r.analysis.episodes[0].counts.pure);
+  assert.strictEqual(countSelection(['△你好，世界！'], 'zh').full, 6); // △ 不计
+  assert.strictEqual(countSelection(['甲（笑）：好的。(Sí, claro que sí.)'], 'zh').full, countSelection(['甲（笑）：好的。'], 'zh').full); // 外译不计
+  assert.strictEqual(countSelection([], 'zh').full, 0);
+});
+
+test('会改变字数的问题必须拦截：独立成行的括号翻译；可一键删除后通过', () => {
+  const p = ref(); p.splice(idx(p, /^△巨大熔炉/), 0, '（英：The furnace roared.）');
+  const r = check(p);
+  assert.strictEqual(r.ok, false);
+  assert.ok(r.issues.some((i) => i.code === 'translation-line' && i.level === 'error' && i.fixable));
+  assert.strictEqual(autoFix(p).report.ok, true);
+});

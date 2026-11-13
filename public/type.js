@@ -116,7 +116,7 @@ function paraHTML(b) {
   else if (['stage', 'ep'].includes(b.kind)) inner = `<b>${esc(b.text)}</b>`;
   else inner = esc(b.text);
   const why = issues.map((x) => `<span class="why ${x.level === 'warn' ? 'w' : ''}">${x.level === 'warn' ? '⚠' : '✗'} ${esc(x.message)}${x.fixable ? `<button data-a="fix" data-id="${x.id}">${x.fix.op === 'delete' ? '删除此行' : x.fix.op === 'insertBefore' ? `补上「${esc(x.fix.text)}」` : '一键改为：' + esc(x.fix.text.slice(0, 40)).replace(/\n/g, ' ')}</button>` : ''}</span>`).join('');
-  return `<div class="${cls}" id="p${b.para}" data-i="${b.para}" title="点击修改本行"><span class="gutter">${b.para + 1}</span>${inner}${why}</div>`;
+  return `<div class="${cls}" id="p${b.para}" data-i="${b.para}" title="点击修改本行；框选文字可统计字数"><span class="gutter">${b.para + 1}</span>${inner}${why}</div>`;
 }
 
 // 空行位置与导出的标准 docx 保持一致
@@ -178,12 +178,12 @@ function chartHTML(eps, unit) {
   const cols = eps.map((e) => {
     const bad = e.v.kind !== 'ok'; const clip = e.n > top;
     const tip = `第${e.no}集 · ${fmt(e.n)} ${unit}` + (bad ? `（${e.v.label}${e.v.diff ? ' ' + fmt(e.v.diff) + ' ' + unit : ''}）` : '');
-    return `<div class="col ${bad ? 'bad' : ''} ${e.v.kind === 'empty' ? 'empty' : ''} ${clip ? 'clip' : ''}" title="${esc(tip)}">${clip ? `<b class="clipn">${fmt(e.n)}</b>` : ''}<i style="height:${pct(e.n)}%"></i></div>`;
+    return `<div class="col ${bad ? 'bad' : ''} ${e.v.kind === 'empty' ? 'empty' : ''} ${clip ? 'clip' : ''}" data-a="ep" data-ep="${e.no}" title="${esc(tip)}（点击定位到文档）">${clip ? `<b class="clipn">${fmt(e.n)}</b>` : ''}<i style="height:${pct(e.n)}%"></i></div>`;
   }).join('');
   const plotW = Math.max(120, $('count').clientWidth - 2 * (innerWidth <= 720 ? 14 : 20) - (innerWidth <= 720 ? 34 : 40) - 2);
   const colW = Math.min(56, (plotW - (eps.length - 1) * 3) / eps.length) + 3;
   const step = Math.max(1, Math.ceil((String(Math.max(...eps.map((e) => e.no))).length * 7 + 14) / colW));
-  const axis = eps.map((e, i) => `<span class="${e.v.kind !== 'ok' ? 'bad' : ''}">${i % step === 0 || (e.v.kind !== 'ok' && step <= 2) ? e.no : ''}</span>`).join('');
+  const axis = eps.map((e, i) => `<span class="${e.v.kind !== 'ok' ? 'bad' : ''}" data-a="ep" data-ep="${e.no}">${i % step === 0 || (e.v.kind !== 'ok' && step <= 2) ? e.no : ''}</span>`).join('');
   return `<div class="chart"><div class="plot">${cols}<div class="band" style="bottom:${pct(S.min)}%;height:${pct(S.max) - pct(S.min)}%"><span class="hi">${S.max}</span><span class="lo">${S.min}</span></div></div><div class="axis">${axis}</div></div>`;
 }
 
@@ -203,7 +203,7 @@ function renderCount() {
   const eps = a.episodes.map((e) => { const n = e.counts[S.caliber]; return { ...e, n, v: verdict(n) }; });
   const bad = eps.filter((e) => e.v.kind !== 'ok');
   const avg = eps.length ? Math.round(eps.reduce((x, e) => x + e.n, 0) / eps.length) : 0;
-  const rej = bad.length ? `<div class="reject"><h3>需打回 ${bad.length} 集</h3><div class="rows">${bad.map((e) => `<div class="rej"><span class="ep">第${e.no}集</span><span class="t">${esc(e.title || '')}</span><span class="w">${fmt(e.n)}</span><span class="tag">${e.v.label}${e.v.diff ? ' ' + fmt(e.v.diff) : ''}</span></div>`).join('')}</div></div>` : '<div class="pass-banner">✓ 全部集数字数合格，无需打回</div>';
+  const rej = bad.length ? `<div class="reject"><h3>需打回 ${bad.length} 集</h3><div class="rows">${bad.map((e) => `<div class="rej" data-a="ep" data-ep="${e.no}" title="点击定位到文档"><span class="ep">第${e.no}集</span><span class="t">${esc(e.title || '')}</span><span class="w">${fmt(e.n)}</span><span class="tag">${e.v.label}${e.v.diff ? ' ' + fmt(e.v.diff) : ''}</span></div>`).join('')}</div></div>` : '<div class="pass-banner">✓ 全部集数字数合格，无需打回</div>';
   el.innerHTML = `<div class="bar" style="position:static;margin:18px 0 0;padding:0 0 10px">
       <div class="group cal"><span class="label">统计口径</span><div class="seg" role="radiogroup"><button data-a="cal" data-v="full" role="radio" aria-checked="${S.caliber === 'full'}">整集正文</button><button data-a="cal" data-v="pure" role="radio" aria-checked="${S.caliber === 'pure'}">纯台词+动作</button></div></div>
       <div class="group"><span class="label">合格区间</span><div class="range"><input id="min" type="number" min="0" value="${S.min}"><span>–</span><input id="max" type="number" min="1" value="${S.max}"><span class="unit">${unit}</span></div></div></div>
@@ -212,7 +212,7 @@ function renderCount() {
       <div class="chips"><span class="chip">共 <b>${eps.length}</b> 集</span><span class="chip ok">合格 <b>${eps.length - bad.length}</b></span>${bad.length ? `<span class="chip bad">打回 <b>${bad.length}</b></span>` : ''}<span class="chip">平均 <b>${fmt(avg)}</b> ${unit}</span>${(a.issues || []).map((i) => `<span class="chip warn">⚠ ${esc(i.text)}</span>`).join('')}</div>
       ${eps.length ? chartHTML(eps, unit) : ''}${rej}
       <details><summary>各集明细（${eps.length} 集）</summary><div class="tbl-wrap"><table class="tbl"><thead><tr><th>集</th><th>场数</th><th>整集正文</th><th>纯台词+动作</th><th>状态</th></tr></thead><tbody>
-      ${eps.map((e) => `<tr class="${e.v.kind !== 'ok' ? 'bad' : ''}"><td>第${e.no}集</td><td>${e.scenes}</td><td class="${S.caliber === 'full' ? 'cur' : ''}">${fmt(e.counts.full)}</td><td class="${S.caliber === 'pure' ? 'cur' : ''}">${fmt(e.counts.pure)}</td><td>${e.v.kind === 'ok' ? '✓' : `<span class="tag">${e.v.label}${e.v.diff ? ' ' + fmt(e.v.diff) : ''}</span>`}</td></tr>`).join('')}</tbody></table></div></details></article>`;
+      ${eps.map((e) => `<tr class="${e.v.kind !== 'ok' ? 'bad' : ''}" data-a="ep" data-ep="${e.no}" style="cursor:pointer"><td>第${e.no}集</td><td>${e.scenes}</td><td class="${S.caliber === 'full' ? 'cur' : ''}">${fmt(e.counts.full)}</td><td class="${S.caliber === 'pure' ? 'cur' : ''}">${fmt(e.counts.pure)}</td><td>${e.v.kind === 'ok' ? '✓' : `<span class="tag">${e.v.label}${e.v.diff ? ' ' + fmt(e.v.diff) : ''}</span>`}</td></tr>`).join('')}</tbody></table></div></details></article>`;
   S.rows = { bad, unit, a };
 }
 
@@ -231,6 +231,19 @@ function applyFix(id) {
   else if (f.op === 'delete') S.paras.splice(it.para, 1);
   recheck();
 }
+function gotoEpisode(no) {
+  if (!S.res) return;
+  const blocks = S.res.format.blocks;
+  const b = blocks.find((x) => x.kind === 'ep' && x.ep === no) || blocks.find((x) => x.kind === 'scene' && new RegExp(`^${no}[-－–—]`).test(x.text));
+  if (!b) return toast(`文档里没有找到第${no}集的位置`);
+  if (S.onlyBad) { S.onlyBad = false; render(); }
+  const w = document.querySelector('.cols'); w.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  const el = $('p' + b.para); if (!el) return;
+  const wrap = document.querySelector('.paper-wrap');
+  wrap.scrollTo({ top: el.offsetTop - 24, behavior: 'smooth' });
+  document.querySelectorAll('.paper .p.epflash').forEach((x) => x.classList.remove('epflash'));
+  el.classList.add('epflash'); setTimeout(() => el.classList.remove('epflash'), 2200);
+}
 function gotoPara(p) {
   if (p === '' || p == null) return;
   if (S.onlyBad === false) { /* 直接滚动 */ }
@@ -246,6 +259,7 @@ document.addEventListener('click', (e) => {
     else if (a === 'recheck') recheck();
     else if (a === 'download') download();
     else if (a === 'goto') gotoPara(btn.dataset.p);
+    else if (a === 'ep') gotoEpisode(Number(btn.dataset.ep));
     else if (a === 'fix') applyFix(Number(btn.dataset.id));
     else if (a === 'cancel') { S.editing = -1; render(); }
     else if (a === 'save') { S.paras[i] = $('ta').value.split('\n').map((x) => x.trim()).filter(Boolean).join('\n') || S.paras[i]; recheck(); }
@@ -334,3 +348,57 @@ function mmJump(clientY, smooth) {
   document.querySelector('.paper-wrap').addEventListener('scroll', syncMinimap, { passive: true });
   window.addEventListener('resize', () => { if (S.res) buildMinimap(); });
 })();
+
+/* ---------- 框选统计字数 ---------- */
+let selTimer = 0; let selSeq = 0;
+function selectedParas() {
+  const sel = window.getSelection();
+  if (!sel || sel.isCollapsed || !sel.rangeCount) return null;
+  const range = sel.getRangeAt(0);
+  const paper = $('paper');
+  if (!paper.contains(range.commonAncestorContainer)) return null;
+  const rows = [...paper.querySelectorAll('.p[data-i]')].filter((r) => range.intersectsNode(r));
+  const out = [];
+  for (const r of rows) {
+    const full = S.paras[Number(r.dataset.i)] || '';
+    // 逐行求「选区 ∩ 该行文字」：只在文字节点上量，行号徽标和提示文字不参与
+    const textNodes = []; const walker = document.createTreeWalker(r, NodeFilter.SHOW_TEXT, { acceptNode: (n) => (n.parentElement.closest('.gutter, .why') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT) });
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) textNodes.push(n);
+    let piece = '';
+    for (const n of textNodes) {
+      if (!range.intersectsNode(n)) continue;
+      const from = n === range.startContainer ? range.startOffset : 0;
+      const to = n === range.endContainer ? range.endOffset : n.data.length;
+      piece += n.data.slice(from, to);
+    }
+    if (piece.trim()) out.push(piece);
+    void full;
+  }
+  return out.length ? out : null;
+}
+
+function showSel(res, n) {
+  let el = $('selbadge');
+  if (!el) { el = document.createElement('div'); el.id = 'selbadge'; document.body.appendChild(el); }
+  const unit = res.lang === 'en' ? '词' : '字';
+  const val = S.caliber === 'pure' ? res.pure : res.full;
+  el.innerHTML = `<div class="sb-n">${fmt(val)}<small>${unit}</small></div><div class="sb-l">已选 ${fmt(n)} 段 · ${S.caliber === 'pure' ? '纯台词+动作' : '整集口径'}</div>
+    <div class="sb-s">另一口径 ${fmt(S.caliber === 'pure' ? res.full : res.pure)} ${unit} · 已排除外译与△</div><button class="sb-x" data-a="selclear" title="取消选择">×</button>`;
+  el.classList.add('on');
+}
+function hideSel() { const el = $('selbadge'); if (el) el.classList.remove('on'); }
+
+document.addEventListener('selectionchange', () => {
+  clearTimeout(selTimer);
+  selTimer = setTimeout(async () => {
+    const paras = selectedParas();
+    if (!paras || !S.res) return hideSel();
+    const my = ++selSeq;
+    try {
+      const lang = S.res.analysis ? S.res.analysis.lang : (/[㐀-鿿]/.test(paras.join('')) ? 'zh' : 'en');
+      const r = await (await postJSON('/api/count', { paragraphs: paras, lang })).json();
+      if (my === selSeq && selectedParas()) showSel({ ...r, lang }, r.paragraphs);
+    } catch { /* 忽略 */ }
+  }, 180);
+});
+document.addEventListener('click', (e) => { const b = e.target.closest('[data-a="selclear"]'); if (b) { window.getSelection().removeAllRanges(); hideSel(); } });

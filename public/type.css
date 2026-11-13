@@ -67,3 +67,19 @@ main { max-width: 1280px; }
 .tab .st.ok { background: var(--ok); color: #fff; } .tab .st.bad { background: var(--red); color: #fff; } .tab .st.run { background: var(--muted); color: #fff; }
 .tab .x { border: 0; background: none; cursor: pointer; color: var(--muted); font-size: 15px; padding: 0 2px; }
 @media (max-width: 980px) { .cols { grid-template-columns: minmax(0, 1fr); } .minimap { display: none; } }
+
+/* 点击柱子定位 */
+.chart .col, .chart .axis span, .reject .rej { cursor: pointer; }
+.chart .col:hover i { filter: brightness(1.12); outline: 2px solid var(--ink); outline-offset: 1px; }
+.reject .rej:hover { border-color: var(--red); box-shadow: var(--shadow); }
+.paper .p.epflash { animation: epflash 2.2s; }
+@keyframes epflash { 0%, 70% { background: #fff3b0; box-shadow: 0 0 0 4px #f0b400; } 100% { background: transparent; box-shadow: 0 0 0 0 transparent; } }
+/* 框选字数浮标：右侧大号 */
+#selbadge { position: fixed; right: 28px; top: 50%; transform: translate(24px, -50%) scale(.96); opacity: 0; pointer-events: none; z-index: 50; min-width: 190px; padding: 18px 26px 14px; border-radius: 18px; background: var(--ink); color: var(--paper); box-shadow: 0 10px 40px rgba(0,0,0,.35); transition: .18s; text-align: center; border: 2px solid var(--red); }
+#selbadge.on { opacity: 1; transform: translate(0, -50%) scale(1); pointer-events: auto; }
+#selbadge .sb-n { font: 900 56px/1 var(--serif); font-variant-numeric: tabular-nums; }
+#selbadge .sb-n small { font: 700 18px var(--sans); margin-left: 6px; opacity: .8; }
+#selbadge .sb-l { margin-top: 8px; font-size: 13px; opacity: .9; }
+#selbadge .sb-s { margin-top: 4px; font-size: 12px; opacity: .6; }
+#selbadge .sb-x { position: absolute; top: 4px; right: 8px; background: none; border: 0; color: inherit; font-size: 18px; cursor: pointer; opacity: .6; }
+@media (max-width: 720px) { #selbadge { right: 10px; top: auto; bottom: 14px; transform: translateY(20px); min-width: 0; padding: 10px 16px; } #selbadge.on { transform: none; } #selbadge .sb-n { font-size: 34px; } }
