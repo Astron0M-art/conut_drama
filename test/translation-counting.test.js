@@ -42,6 +42,14 @@ test('无标签的短外语回答及译文人名不因长度短而漏入字数',
   }
 });
 
+test('未标注语言但夹带中文名的西语整句也不计数，中文动作说明继续保留', () => {
+  assert.deepEqual(oneEpisode([
+    '甲：你好。（Desalojen el departamento de Mariana, por favor.）',
+  ]).counts, allCounts(5));
+  assert.deepEqual(oneEpisode(['甲（看向Jack）：走。']).counts, allCounts(9));
+  assert.deepEqual(oneEpisode(['甲（低声看向Jack）：走。']).counts, allCounts(11));
+});
+
 test('中文动作括号及OS、V.O.保留，夹杂英文人名仍按每词一字', () => {
   const body = ['甲（低声）：走。', '甲（OS）：走。', '甲（V.O.）：走。', 'Jack刚刚告诉我。'];
   // 中文动作8，OS行7，V.O.行10，Jack行7；括号和中文标点仍计数。
