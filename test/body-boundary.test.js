@@ -250,3 +250,12 @@ test('显式集标题优先于错误或沿用的场次前缀，不生成第0集�
   assert.equal(result.issues.some((issue) => /重复/.test(issue.text)), false);
   assert.ok(result.episodes.every((episode) => episode.paragraphs > 0));
 });
+
+test('错误场次前缀的分页续页仍并入显式集标题', () => {
+  const result = analyzeParagraphs([
+    '剧本正文', '第13集', '13-1 日 内 工坊', '甲：第一页。',
+    '第13集', '3-2 日 内 后堂', '乙：第二页。',
+  ]);
+  assert.deepEqual(result.episodes.map((episode) => [episode.no, episode.scenes, episode.paragraphs]), [[13, 2, 4]]);
+  assert.equal(result.issues.some((issue) => issue.type === 'dup'), false);
+});
