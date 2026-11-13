@@ -48,14 +48,15 @@ test('缺集：第1集后直接第3集', () => {
   assert.ok(codes(p).includes('episode-missing'));
 });
 
-test('场次号不连续、集标题带标题、半角冒号、△后空格：只是提示，不拦截，且都能一键修复', () => {
+test('场次号不连续、集标题带标题、半角冒号：只是提示，不拦截，且都能一键修复；△后空格直接放过', () => {
   const p = ref();
   p[idx(p, /^第2集$/)] = '第2集 废料堆奇遇';
   p[idx(p, /^2-2 /)] = p[idx(p, /^2-2 /)].replace('2-2', '2-3');
   p[idx(p, /^△黑铁被刨出/)] = '△ 黑铁被刨出半截';
   const r = check(p);
   assert.strictEqual(r.ok, true);
-  assert.ok(r.warns >= 3 && r.fixable >= 3);
+  assert.ok(!r.issues.some((i) => i.para === idx(p, /^△ 黑铁被刨出/)), '△后空格不应有任何提示');
+  assert.ok(r.warns >= 2 && r.fixable >= 2);
   const f = autoFix(p);
   assert.strictEqual(f.report.warns, 0);
   assert.ok(f.paras.includes('第2集') && f.paras.some((t) => t.startsWith('2-2 ')));
