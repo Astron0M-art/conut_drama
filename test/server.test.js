@@ -42,7 +42,7 @@ test('未登录：页面跳到登录页，接口与资源返回 401，登录页�
   assert.strictEqual((await get('/app.js')).status, 401);
   assert.strictEqual((await get('/api/me')).status, 401);
   assert.strictEqual((await get('/healthz')).status, 401);
-  assert.strictEqual((await post('/api/analyze', 'x', { 'X-Filename': 'a.txt' })).status, 401);
+  assert.strictEqual((await post('/api/validate', 'x', { 'X-Filename': 'a.txt' })).status, 401);
 
   const login = await get('/login');
   assert.strictEqual(login.status, 200);
@@ -68,16 +68,13 @@ test('登录：错误密码 401；正确密码发 HttpOnly 会话 Cookie，凭�
   assert.strictEqual((await get('/login', cookie)).headers.get('location'), '/'); // 已登录不再看登录页
   assert.deepStrictEqual(await (await get('/api/me', cookie)).json(), { auth: true, user: 'admin' });
 
-  const r = await fetch(base + '/api/analyze', { method: 'POST', headers: { Cookie: cookie, 'X-Filename': 'a.txt' }, body: '第1集\n△你好。\n' });
+  const r = await fetch(base + '/api/validate', { method: 'POST', headers: { Cookie: cookie, 'X-Filename': 'a.txt' }, body: '第1集\n△你好。\n' });
   assert.strictEqual(r.status, 200);
   const blocked = await r.json();
-  assert.strictEqual(blocked.formatFailed, true); // 格式不通过：不统计字数
-  assert.ok(blocked.top.length > 0 && !blocked.episodes);
+  assert.strictEqual(blocked.format.ok, false); // 格式不通过：不统计字数
+  assert.strictEqual(blocked.analysis, undefined);
 
   const ref = require('node:fs').readFileSync(path.join(__dirname, 'fixtures', 'reference.docx'));
-  const okRes = await fetch(base + '/api/analyze', { method: 'POST', headers: { Cookie: cookie, 'X-Filename': encodeURIComponent('ref.docx') }, body: ref });
-  assert.strictEqual((await okRes.json()).episodes.length, 3); // 格式通过：给出统计
-
   const v = await fetch(base + '/api/validate', { method: 'POST', headers: { Cookie: cookie, 'X-Filename': encodeURIComponent('ref.docx') }, body: ref });
   const vj = await v.json();
   assert.strictEqual(vj.format.ok, true);

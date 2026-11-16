@@ -1,7 +1,8 @@
 # 字数统计 · 打回编剧重申工作台
 
-批量上传剧本（`.docx` / `.txt` / `.md`，一次最多 10 本），逐集统计正文字数，
-不在合格区间（默认 550–1000 字）内的集标红，可一键复制「打回清单」或导出 CSV。
+上传剧本（`.docx` / `.txt` / `.md`，一次最多 20 本并发）：**先格式校验，通过后才统计正文字数**。
+不在合格区间（默认 550–1000 字）内的集标红，点击柱子可定位到文档，框选文字实时统计字数，
+可一键复制「打回清单」。只有一个页面（`/`），校验与统计衔接在同一页。
 
 零依赖，Node ≥ 18。
 
@@ -100,7 +101,8 @@ ssh my-server 'sudo nano /etc/count-drama.env && sudo systemctl restart count-dr
 ## 目录
 
 ```
-server.js        HTTP 服务（静态页 + POST /api/analyze + GET /healthz）
+server.js        HTTP 服务（静态页 + POST /api/validate|recheck|fix|export|count + GET /healthz）
+lib/format/      格式校验 / 一键修复 / 导出标准 docx（参考稿 reference.docx）
 lib/wps.js       WPS 字数算法
 lib/docx.js      零依赖读取 docx / txt
 lib/episodes.js  分集 + 三口径统计

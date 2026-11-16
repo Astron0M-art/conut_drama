@@ -34,7 +34,7 @@ f.fixParagraphs(paras)               // 反复「校验→应用可修复项」�
 f.exportDocx(paras)                  // Buffer，沿用参考稿样式表；传入必须已通过校验
 ```
 
-HTTP（需登录）：`POST /api/validate`（原文件，头 `X-Filename`）、`/api/recheck`、`/api/fix`、`/api/export`（JSON `{name, paragraphs}`；export 未通过返回 422）。页面：`/type`。
+HTTP（需登录）：`POST /api/validate`（原文件，头 `X-Filename`）、`/api/recheck`、`/api/fix`、`/api/export`（JSON `{name, paragraphs}`；export 未通过返回 422）。页面：`/`（`/type` 会跳转到 `/`）。
 
 issue 结构：`{id, level:'error'|'warn', code, para, message, fixable, fix?:{op:'set'|'insertBefore'|'delete', text?}}`。`para` 是逻辑段落下标（读入时已去空行、并合并软换行）。
 

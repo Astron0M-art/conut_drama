@@ -40,11 +40,12 @@ const PUBLIC = path.join(__dirname, 'public');
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml' };
 const statics = new Map();
 for (const f of fs.readdirSync(PUBLIC)) statics.set('/' + f, f);
-statics.set('/', 'index.html');
+statics.set('/', 'type.html');
 statics.set('/login', 'login.html');
 statics.delete('/login.html');
-statics.set('/type', 'type.html');
 statics.delete('/type.html');
+statics.delete('/index.html');
+statics.delete('/app.js');
 const OPEN = new Set(['/login', '/login.css', '/login.js', '/style.css']); // 登录前就要能打开的
 
 const SECURITY = {
@@ -179,30 +180,6 @@ async function handleFormat(req, res, kind) {
   }
 }
 
-async function handleAnalyze(req, res) {
-  const ip = clientIp(req);
-  if ((inflight.get(ip) || 0) >= MAX_PER_IP || pool.pending >= MAX_QUEUE) {
-    return send(res, 503, { error: '服务繁忙，请稍后重试' }, undefined, { 'Retry-After': '3' });
-  }
-  inflight.set(ip, (inflight.get(ip) || 0) + 1);
-  try {
-    let name = '';
-    try { name = decodeURIComponent(req.headers['x-filename'] || ''); } catch { /* 留空 */ }
-    if (!name) return send(res, 400, { error: '缺少文件名' });
-    const buf = await readBody(req, MAX_FILE, '文件超过 30MB');
-    if (!buf.length) return send(res, 400, { error: '文件内容为空' });
-    send(res, 200, await pool.run(buf, name));
-  } catch (e) {
-    // 解析类错误是用户文件的问题（400），其余才是服务端问题
-    const status = e.status || 400;
-    if (status === 413) res.once('finish', () => req.destroy()); // 不再接收剩余数据
-    send(res, status, { error: e.message || '分析失败' }, undefined, status === 413 ? { Connection: 'close' } : {});
-  } finally {
-    const n = (inflight.get(ip) || 1) - 1;
-    n ? inflight.set(ip, n) : inflight.delete(ip);
-  }
-}
-
 function handle(req, res) {
   const url = req.url.split('?')[0];
   const get = req.method === 'GET';
@@ -210,15 +187,15 @@ function handle(req, res) {
   if (req.method === 'POST' && url === '/api/login') return handleLogin(req, res);
   if (req.method === 'POST' && url === '/api/logout') return handleLogout(req, res);
 
+  if (get && url === '/type') return redirect(res, '/');
   if (get && url === '/login' && authed(req)) return redirect(res, '/'); // 已登录就不用再看登录页
   if (get && OPEN.has(url)) return serveStatic(res, url);
 
   if (!authed(req)) {
     // 页面跳登录页；接口和其他资源直接 401
-    return get && (url === '/' || url === '/index.html' || url === '/type') ? redirect(res, '/login') : send(res, 401, { error: '未登录' });
+    return get && url === '/' ? redirect(res, '/login') : send(res, 401, { error: '未登录' });
   }
 
-  if (req.method === 'POST' && url === '/api/analyze') return handleAnalyze(req, res);
   if (req.method === 'POST' && /^\/api\/(validate|recheck|fix|export|count)$/.test(url)) return handleFormat(req, res, url.slice(5));
   if (get && url === '/api/me') return send(res, 200, { auth: auth.enabled, user: auth.enabled ? auth.user : null }, undefined, { 'Cache-Control': 'no-store' });
   if (get && url === '/healthz') return send(res, 200, { ok: true, pending: pool.pending });

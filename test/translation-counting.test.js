@@ -126,20 +126,3 @@ test('纯英文剧本沿用英文词规则，英文括号动作不误当成双�
   assert.deepEqual(result.episodes[0].counts, { full: 9, clean: 9, pure: 7 });
 });
 
-test('实际前端默认整集口径和CSV按去翻译后的550字判定合格', () => {
-  const body = `${'甲'.repeat(549)} Jack（西：${'Hola '.repeat(600)}.）`;
-  const book = {
-    id: 1, name: '翻译计数验收', status: 'done',
-    file: { name: 'translation-boundary.txt', size: Buffer.byteLength(body) },
-    result: analyzeBuffer(Buffer.from(`剧本正文\n第1集\n${body}`), 'translation-boundary.txt'),
-  };
-  const source = fs.readFileSync(path.join(__dirname, '../public/app.js'), 'utf8');
-  const context = vm.createContext({ book, innerWidth: 1024, document: { getElementById: () => ({ clientWidth: 900 }) } });
-  vm.runInContext(source.slice(0, source.indexOf('/* ---------------- 事件')), context);
-  vm.runInContext('state.books = [book]', context);
-  assert.equal(vm.runInContext('state.caliber', context), 'full');
-  assert.equal(vm.runInContext('summarize(book).eps[0].n', context), 550);
-  assert.equal(vm.runInContext('summarize(book).eps[0].v.kind', context), 'ok');
-  assert.match(vm.runInContext('bookHTML(book)', context), /全部集数字数合格/);
-  assert.match(vm.runInContext('csvText()', context), /"550","550","合格","0"/);
-});

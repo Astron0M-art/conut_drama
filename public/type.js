@@ -7,7 +7,7 @@ const MAX_BOOKS = 20;
 const CONCURRENCY = 20;
 const EXTS = ['.docx', '.txt', '.md'];
 // S 是「当前选中那一本」的视图；books 保存每本的状态
-const S = { name: '', paras: [], res: null, editing: -1, onlyBad: false, min: 550, max: 1000, caliber: 'full', busy: false };
+const S = { marks: {}, showTr: true, name: '', paras: [], res: null, editing: -1, onlyBad: false, min: 550, max: 1000, caliber: 'full', busy: false };
 const books = []; let cur = null; let seq = 0;
 
 function toast(msg) { const t = $('toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('show'), 3000); }
@@ -23,7 +23,7 @@ const postJSON = (url, body) => call(url, { method: 'POST', headers: { 'Content-
 function select(b) {
   if (cur) { cur.paras = S.paras; cur.res = S.res; cur.onlyBad = S.onlyBad; }
   cur = b;
-  S.name = b.name; S.paras = b.paras || []; S.res = b.res || null; S.editing = -1; S.onlyBad = !!b.onlyBad;
+  S.name = b.name; S.paras = b.paras || []; S.res = b.res || null; S.marks = (b.res && b.res.marks) || {}; S.editing = -1; S.onlyBad = !!b.onlyBad;
   renderTabs();
   if (b.status === 'done' && S.res) render(); else { $('stage').hidden = true; $('steps').hidden = true; }
 }
@@ -86,11 +86,11 @@ function addFiles(list) {
 
 async function recheck() {
   const d = await (await postJSON('/api/recheck', { name: S.name, paragraphs: S.paras })).json();
-  S.res = d; S.editing = -1; if (cur) { cur.res = d; cur.paras = S.paras; } render(); renderTabs();
+  S.res = d; S.marks = d.marks || {}; S.editing = -1; if (cur) { cur.res = d; cur.paras = S.paras; } render(); renderTabs();
 }
 async function autofix() {
   const d = await (await postJSON('/api/fix', { name: S.name, paragraphs: S.paras })).json();
-  S.paras = d.paragraphs; S.res = d; S.editing = -1; if (cur) { cur.res = d; cur.paras = d.paragraphs; } render(); renderTabs();
+  S.paras = d.paragraphs; S.res = d; S.marks = d.marks || {}; S.editing = -1; if (cur) { cur.res = d; cur.paras = d.paragraphs; } render(); renderTabs();
   toast(`已自动修复 ${d.applied} 处${d.format.ok ? '，格式通过，已进入字数统计' : `，还剩 ${d.format.errors} 个错误需手动处理`}`);
 }
 async function download() {
@@ -115,8 +115,21 @@ function paraHTML(b) {
   if (['field', 'pfield', 'jigang'].includes(b.kind) && m) inner = `<b>${esc(m[1])}</b>${esc(m[2])}`;
   else if (['stage', 'ep'].includes(b.kind)) inner = `<b>${esc(b.text)}</b>`;
   else inner = esc(b.text);
+  inner = markTranslations(b, inner);
   const why = issues.map((x) => `<span class="why ${x.level === 'warn' ? 'w' : ''}">${x.level === 'warn' ? '⚠' : '✗'} ${esc(x.message)}${x.fixable ? `<button data-a="fix" data-id="${x.id}">${x.fix.op === 'delete' ? '删除此行' : x.fix.op === 'insertBefore' ? `补上「${esc(x.fix.text)}」` : '一键改为：' + esc(x.fix.text.slice(0, 40)).replace(/\n/g, ' ')}</button>` : ''}</span>`).join('');
   return `<div class="${cls}" id="p${b.para}" data-i="${b.para}" title="点击修改本行；框选文字可统计字数"><span class="gutter">${b.para + 1}</span>${inner}${why}</div>`;
+}
+
+// 在原文里把「外语翻译」标出来（灰色删除线 = 不计字数）。只处理正文里的段落
+function markTranslations(b, html) {
+  const spans = S.marks[b.para];
+  if (!spans || !spans.length || !S.showTr) return html;
+  const text = b.text; let out = ''; let pos = 0;
+  for (const [a, e] of spans) { out += esc(text.slice(pos, a)) + `<s class="tr" title="外语翻译：不计字数">${esc(text.slice(a, e))}</s>`; pos = e; }
+  const rendered = out + esc(text.slice(pos));
+  // 带「标签：」前缀的行，保持前半加粗
+  const m = /^([^：\n]*：)/.exec(text);
+  return ['field', 'pfield', 'jigang'].includes(b.kind) && m ? html : rendered;
 }
 
 // 空行位置与导出的标准 docx 保持一致
@@ -154,6 +167,7 @@ function render() {
   $('statusbar').className = `statusbar ${f.ok ? 'pass' : 'fail'}`;
   $('statusbar').innerHTML = `<div class="t">${f.ok ? '✓ 格式通过' : '✗ 格式未通过，暂不统计字数'}<small>《${esc(S.name)}》 · ${S.paras.length} 段 · 错误 ${f.errors} · 提示 ${f.warns}</small></div>
     <label class="chk"><input type="checkbox" id="onlyBad" ${S.onlyBad ? 'checked' : ''}>只看有问题的行</label>
+    <label class="chk" title="被判为外语翻译的括号内容，不计字数"><input type="checkbox" id="showTr" ${S.showTr ? 'checked' : ''}>标出不计字数的翻译（${Object.values(S.marks || {}).reduce((n, m) => n + m.length, 0)} 处）</label>
     ${f.fixable ? `<button class="btn" data-a="autofix">一键自动修复（${f.fixable}）</button>` : ''}
     <button class="btn ghost" data-a="recheck">重新校验</button>
     <button class="btn ${f.ok ? '' : 'ghost'}" data-a="download" ${f.ok ? '' : 'disabled title="格式通过后才能导出标准 docx"'}>下载标准格式 docx</button>`;
@@ -250,16 +264,25 @@ function applyFix(id) {
   else if (f.op === 'delete') S.paras.splice(it.para, 1);
   recheck();
 }
+// 把某一行放到文档视窗正中（用相对容器的真实位置，不用 offsetTop，避免偏到下一集）
+function centerRow(el, smooth = true) {
+  const wrap = document.querySelector('.paper-wrap');
+  const wr = wrap.getBoundingClientRect(); const er = el.getBoundingClientRect();
+  const target = wrap.scrollTop + (er.top - wr.top) - (wrap.clientHeight - er.height) / 2;
+  wrap.scrollTo({ top: Math.max(0, target), behavior: smooth ? 'smooth' : 'auto' });
+}
 function gotoEpisode(no) {
   if (!S.res) return;
   const blocks = S.res.format.blocks;
   const b = blocks.find((x) => x.kind === 'ep' && x.ep === no) || blocks.find((x) => x.kind === 'scene' && new RegExp(`^${no}[-－–—]`).test(x.text));
   if (!b) return toast(`文档里没有找到第${no}集的位置`);
   if (S.onlyBad) { S.onlyBad = false; render(); }
-  const w = document.querySelector('.cols'); w.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  // 先让整个文档区在页面里居中，再在文档区内把该集标题放到正中
+  const cols = document.querySelector('.cols');
+  const cr = cols.getBoundingClientRect();
+  window.scrollTo({ top: window.scrollY + cr.top - Math.max(8, (window.innerHeight - cr.height) / 2), behavior: 'smooth' });
   const el = $('p' + b.para); if (!el) return;
-  const wrap = document.querySelector('.paper-wrap');
-  wrap.scrollTo({ top: el.offsetTop - 24, behavior: 'smooth' });
+  centerRow(el);
   document.querySelectorAll('.paper .p.epflash').forEach((x) => x.classList.remove('epflash'));
   el.classList.add('epflash'); setTimeout(() => el.classList.remove('epflash'), 2200);
 }
@@ -267,7 +290,7 @@ function gotoPara(p) {
   if (p === '' || p == null) return;
   if (S.onlyBad === false) { /* 直接滚动 */ }
   const el = $('p' + p); if (!el) { S.onlyBad = true; render(); return gotoPara(p); }
-  el.scrollIntoView({ block: 'center', behavior: 'smooth' }); el.classList.add('flash'); setTimeout(() => el.classList.remove('flash'), 1300);
+  centerRow(el); el.classList.add('flash'); setTimeout(() => el.classList.remove('flash'), 1300);
 }
 
 document.addEventListener('click', (e) => {
@@ -303,6 +326,7 @@ document.addEventListener('click', (e) => {
 });
 document.addEventListener('change', (e) => {
   if (e.target.id === 'onlyBad') { S.onlyBad = e.target.checked; render(); }
+  if (e.target.id === 'showTr') { S.showTr = e.target.checked; render(); }
   if (e.target.id === 'min' || e.target.id === 'max') { S.min = Number($('min').value) || 0; S.max = Number($('max').value) || 1; renderCount(); }
 });
 
