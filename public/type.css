@@ -101,3 +101,8 @@ main { max-width: 1280px; }
 s.tr, .paper s.tr { color: #9a9a9a; text-decoration: line-through; text-decoration-color: #c0392b; background: rgba(160,160,160,.14); border-radius: 2px; }
 @media (max-width: 1280px) { .cols { grid-template-columns: 22px 280px minmax(0, 1fr); } .guide { grid-column: 1 / -1; position: static; max-height: none; } }
 @media (max-width: 980px) { .cols { grid-template-columns: minmax(0, 1fr); } }
+
+/* 不计字数的行（场次头 / 人物行）在文档里标灰 */
+.paper .p.nc { color: #8a8a8a; background: rgba(160,160,160,.10); border-left: 3px solid #c9c9c9; }
+.paper .p.nc::after { content: "不计字数"; position: absolute; right: 4px; top: 2px; font: 10px var(--sans); color: #aaa; }
+.opt { display: inline-flex; align-items: center; gap: 5px; margin-left: 10px; font-size: 13px; cursor: pointer; }

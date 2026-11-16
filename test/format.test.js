@@ -137,3 +137,16 @@ test('独立成行的「（中：…）」译文行：保留，不提示不报�
   assert.ok(r.ok && r.issues.length === 0);
   assert.ok(autoFix(p).paras.includes(t));
 });
+
+test('场次头、人物行字数可单独组合：full = pure + 场次头 + 人物行；选区同理', () => {
+  const { countSelection } = require('../lib/episodes');
+  const r = validateParagraphs(ref());
+  for (const e of r.analysis.episodes) {
+    assert.strictEqual(e.counts.pure + e.parts.scene + e.parts.cast, e.counts.full, `第${e.no}集`);
+    assert.ok(e.parts.scene > 0 && e.parts.cast > 0);
+  }
+  const c = countSelection(['11-1 夜 内 闻家老宅·西偏院书房', '人物：纪衡、温禾、温小满、纪安', '△他推门进来。'], 'zh');
+  assert.strictEqual(c.pure, 6); // 只有动作，△ 不计
+  assert.ok(c.scene > 0 && c.cast > 0);
+  assert.strictEqual(c.pure + c.scene + c.cast, c.full);
+});

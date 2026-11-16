@@ -7,7 +7,10 @@ const MAX_BOOKS = 20;
 const CONCURRENCY = 20;
 const EXTS = ['.docx', '.txt', '.md'];
 // S 是「当前选中那一本」的视图；books 保存每本的状态
-const S = { marks: {}, showTr: true, name: '', paras: [], res: null, editing: -1, onlyBad: false, min: 550, max: 1000, caliber: 'full', busy: false };
+const S = { marks: {}, showTr: true, name: '', paras: [], res: null, editing: -1, onlyBad: false, min: 550, max: 1000, incScene: false, incCast: false, busy: false };
+// 字数 = 台词与动作 +（可选）场次头 +（可选）人物行；默认两者都不计
+const countOf = (c, p) => c.pure + (S.incScene ? p.scene : 0) + (S.incCast ? p.cast : 0);
+const modeText = () => (S.incScene || S.incCast ? `计入${[S.incScene && '场次头', S.incCast && '人物行'].filter(Boolean).join('、')}` : '不计场次头、人物行');
 const books = []; let cur = null; let seq = 0;
 
 function toast(msg) { const t = $('toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('show'), 3000); }
@@ -105,7 +108,7 @@ async function download() {
 function paraHTML(b) {
   const issues = b.issues.map((id) => S.res.format.issues.find((x) => x.id === id)).filter(Boolean);
   const hasErr = issues.some((x) => x.level === 'error');
-  const cls = ['p', b.kind, b.kind === 'title' ? 'title' : '', b.kind === 'h2' ? 'h2' : '', issues.length ? (hasErr ? 'bad' : 'warnrow') : ''].join(' ');
+  const cls = ['p', b.kind, b.kind === 'title' ? 'title' : '', b.kind === 'h2' ? 'h2' : '', issues.length ? (hasErr ? 'bad' : 'warnrow') : '', (b.kind === 'scene' && !S.incScene) || (b.kind === 'cast' && !S.incCast) ? 'nc' : ''].join(' ');
   let inner;
   if (S.editing === b.para) {
     return `<div class="${cls}" id="p${b.para}"><textarea id="ta" rows="${Math.min(8, b.text.split('\n').length + 1)}">${esc(b.text)}</textarea>
@@ -117,7 +120,7 @@ function paraHTML(b) {
   else inner = esc(b.text);
   inner = markTranslations(b, inner);
   const why = issues.map((x) => `<span class="why ${x.level === 'warn' ? 'w' : ''}">${x.level === 'warn' ? '⚠' : '✗'} ${esc(x.message)}${x.fixable ? `<button data-a="fix" data-id="${x.id}">${x.fix.op === 'delete' ? '删除此行' : x.fix.op === 'insertBefore' ? `补上「${esc(x.fix.text)}」` : '一键改为：' + esc(x.fix.text.slice(0, 40)).replace(/\n/g, ' ')}</button>` : ''}</span>`).join('');
-  return `<div class="${cls}" id="p${b.para}" data-i="${b.para}" title="点击修改本行；框选文字可统计字数"><span class="gutter">${b.para + 1}</span>${inner}${why}</div>`;
+  return `<div class="${cls}" id="p${b.para}" data-i="${b.para}" title="${/\bnc\b/.test(cls) ? '这一行不计字数（可在统计区「哪些算字数」勾选改变）；' : ''}点击修改本行；框选文字可统计字数"><span class="gutter">${b.para + 1}</span>${inner}${why}</div>`;
 }
 
 // 在原文里把「外语翻译」标出来（灰色删除线 = 不计字数）。只处理正文里的段落
@@ -214,19 +217,21 @@ function renderCount() {
   const el = $('count'); const a = S.res.analysis;
   if (!S.res.format.ok || !a) { el.innerHTML = '<div class="lock">🔒 第 ② 步「字数统计」在格式校验通过后自动解锁</div>'; return; }
   const unit = a.lang === 'en' ? '词' : '字';
-  const eps = a.episodes.map((e) => { const n = e.counts[S.caliber]; return { ...e, n, v: verdict(n) }; });
+  const eps = a.episodes.map((e) => { const n = countOf(e.counts, e.parts); return { ...e, n, v: verdict(n) }; });
   const bad = eps.filter((e) => e.v.kind !== 'ok');
   const avg = eps.length ? Math.round(eps.reduce((x, e) => x + e.n, 0) / eps.length) : 0;
   const rej = bad.length ? `<div class="reject"><h3>需打回 ${bad.length} 集</h3><div class="rows">${bad.map((e) => `<div class="rej" data-a="ep" data-ep="${e.no}" title="点击定位到文档"><span class="ep">第${e.no}集</span><span class="t">${esc(e.title || '')}</span><span class="w">${fmt(e.n)}</span><span class="tag">${e.v.label}${e.v.diff ? ' ' + fmt(e.v.diff) : ''}</span></div>`).join('')}</div></div>` : '<div class="pass-banner">✓ 全部集数字数合格，无需打回</div>';
   el.innerHTML = `<div class="bar" style="position:static;margin:18px 0 0;padding:0 0 10px">
-      <div class="group cal"><span class="label">统计口径</span><div class="seg" role="radiogroup"><button data-a="cal" data-v="full" role="radio" aria-checked="${S.caliber === 'full'}">整集正文</button><button data-a="cal" data-v="pure" role="radio" aria-checked="${S.caliber === 'pure'}">纯台词+动作</button></div></div>
+      <div class="group"><span class="label">哪些算字数</span>
+        <label class="opt"><input type="checkbox" id="incScene" ${S.incScene ? 'checked' : ''}>场次头（如 11-1 夜 内 闻家老宅·西偏院书房）</label>
+        <label class="opt"><input type="checkbox" id="incCast" ${S.incCast ? 'checked' : ''}>人物行（如 人物：纪衡、温禾）</label></div>
       <div class="group"><span class="label">合格区间</span><div class="range"><input id="min" type="number" min="0" value="${S.min}"><span>–</span><input id="max" type="number" min="1" value="${S.max}"><span class="unit">${unit}</span></div></div></div>
     <article class="book ${bad.length ? 'has-bad' : ''}">
       <header class="book-head"><div class="grow"><h2>${esc(S.name)}</h2><div class="meta">② 字数统计 · ${a.lang === 'en' ? '英文剧本 · 按单词计数' : '含标点与英文词 · 不含外译'}</div></div>${bad.length ? '<button class="btn sm" data-a="copy">复制打回清单</button>' : ''}</header>
       <div class="chips"><span class="chip">共 <b>${eps.length}</b> 集</span><span class="chip ok">合格 <b>${eps.length - bad.length}</b></span>${bad.length ? `<span class="chip bad">打回 <b>${bad.length}</b></span>` : ''}<span class="chip">平均 <b>${fmt(avg)}</b> ${unit}</span>${(a.issues || []).map((i) => `<span class="chip warn">⚠ ${esc(i.text)}</span>`).join('')}</div>
       ${eps.length ? chartHTML(eps, unit) : ''}${rej}
-      <details><summary>各集明细（${eps.length} 集）</summary><div class="tbl-wrap"><table class="tbl"><thead><tr><th>集</th><th>场数</th><th>整集正文</th><th>纯台词+动作</th><th>状态</th></tr></thead><tbody>
-      ${eps.map((e) => `<tr class="${e.v.kind !== 'ok' ? 'bad' : ''}" data-a="ep" data-ep="${e.no}" style="cursor:pointer"><td>第${e.no}集</td><td>${e.scenes}</td><td class="${S.caliber === 'full' ? 'cur' : ''}">${fmt(e.counts.full)}</td><td class="${S.caliber === 'pure' ? 'cur' : ''}">${fmt(e.counts.pure)}</td><td>${e.v.kind === 'ok' ? '✓' : `<span class="tag">${e.v.label}${e.v.diff ? ' ' + fmt(e.v.diff) : ''}</span>`}</td></tr>`).join('')}</tbody></table></div></details></article>`;
+      <details><summary>各集明细（${eps.length} 集）</summary><div class="tbl-wrap"><table class="tbl"><thead><tr><th>集</th><th>场数</th><th>字数</th><th>场次头(字)</th><th>人物行(字)</th><th>状态</th></tr></thead><tbody>
+      ${eps.map((e) => `<tr class="${e.v.kind !== 'ok' ? 'bad' : ''}" data-a="ep" data-ep="${e.no}" style="cursor:pointer"><td>第${e.no}集</td><td>${e.scenes}</td><td class="cur">${fmt(e.n)}</td><td>${fmt(e.parts.scene)}</td><td>${fmt(e.parts.cast)}</td><td>${e.v.kind === 'ok' ? '✓' : `<span class="tag">${e.v.label}${e.v.diff ? ' ' + fmt(e.v.diff) : ''}</span>`}</td></tr>`).join('')}</tbody></table></div></details></article>`;
   S.rows = { bad, unit, a };
 }
 
@@ -307,7 +312,6 @@ document.addEventListener('click', (e) => {
     else if (a === 'save') { S.paras[i] = $('ta').value.split('\n').map((x) => x.trim()).filter(Boolean).join('\n') || S.paras[i]; recheck(); }
     else if (a === 'del') { S.paras.splice(i, 1); recheck(); }
     else if (a === 'addafter') { S.paras.splice(i + 1, 0, '△'); S.editing = i + 1; recheck(); }
-    else if (a === 'cal') { S.caliber = btn.dataset.v; renderCount(); }
     else if (a === 'copy') copyReject();
     else if (a === 'tab') { const b = books.find((x) => x.id === Number(btn.dataset.id)); if (b && b !== cur) select(b); }
     else if (a === 'rm') {
@@ -327,6 +331,7 @@ document.addEventListener('click', (e) => {
 document.addEventListener('change', (e) => {
   if (e.target.id === 'onlyBad') { S.onlyBad = e.target.checked; render(); }
   if (e.target.id === 'showTr') { S.showTr = e.target.checked; render(); }
+  if (e.target.id === 'incScene' || e.target.id === 'incCast') { S[e.target.id] = e.target.checked; render(); }
   if (e.target.id === 'min' || e.target.id === 'max') { S.min = Number($('min').value) || 0; S.max = Number($('max').value) || 1; renderCount(); }
 });
 
@@ -424,9 +429,9 @@ function showSel(res, n) {
   let el = $('selbadge');
   if (!el) { el = document.createElement('div'); el.id = 'selbadge'; document.body.appendChild(el); }
   const unit = res.lang === 'en' ? '词' : '字';
-  const val = S.caliber === 'pure' ? res.pure : res.full;
-  el.innerHTML = `<div class="sb-n">${fmt(val)}<small>${unit}</small></div><div class="sb-l">已选 ${fmt(n)} 段 · ${S.caliber === 'pure' ? '纯台词+动作' : '整集口径'}</div>
-    <div class="sb-s">另一口径 ${fmt(S.caliber === 'pure' ? res.full : res.pure)} ${unit} · 已排除外译与△</div><button class="sb-x" data-a="selclear" title="取消选择">×</button>`;
+  const val = countOf(res, res);
+  el.innerHTML = `<div class="sb-n">${fmt(val)}<small>${unit}</small></div><div class="sb-l">已选 ${fmt(n)} 段 · ${modeText()}</div>
+    <div class="sb-s">含场次头+人物行共 ${fmt(res.full)} ${unit} · 已排除外译与△</div><button class="sb-x" data-a="selclear" title="取消选择">×</button>`;
   el.classList.add('on');
 }
 function hideSel() { const el = $('selbadge'); if (el) el.classList.remove('on'); }
