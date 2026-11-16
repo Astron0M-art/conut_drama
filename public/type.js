@@ -216,10 +216,29 @@ function renderCount() {
   S.rows = { bad, unit, a };
 }
 
+// HTTP 页面没有 navigator.clipboard（只在 HTTPS/localhost 可用），先试它，失败就用 execCommand 降级
+async function copyText(text) {
+  try { if (navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(text); return true; } } catch { /* 降级 */ }
+  const ta = document.createElement('textarea');
+  ta.value = text; ta.setAttribute('readonly', ''); ta.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:1px;opacity:0';
+  document.body.appendChild(ta); ta.focus(); ta.select();
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch { ok = false; }
+  ta.remove();
+  return ok;
+}
+// 两种方式都失败时，弹出文本框并全选，用户按 Ctrl/Cmd+C 即可
+function manualCopy(text) {
+  let box = $('manualcopy');
+  if (!box) { box = document.createElement('div'); box.id = 'manualcopy'; document.body.appendChild(box); }
+  box.innerHTML = '<div class="mc-card"><div class="mc-t">自动复制不可用，请按 Ctrl/Cmd + C 复制</div><textarea readonly></textarea><button class="btn sm" data-a="mcclose">关闭</button></div>';
+  const ta = box.querySelector('textarea'); ta.value = text; box.hidden = false; ta.focus(); ta.select();
+}
+
 function copyReject() {
   const { bad, unit } = S.rows;
   const t = [`《${S.name}》字数要求 ${S.min}–${S.max}，需打回 ${bad.length} 集：`, ...bad.map((e) => `第${e.no}集：${e.v.kind === 'empty' ? '空集' : `${fmt(e.n)} ${unit}，${e.v.kind === 'short' ? '少' : '多'} ${fmt(e.v.diff)} ${unit}`}`)].join('\n');
-  (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).then(() => toast('已复制打回清单'), () => toast('复制失败，请手动选择'));
+  copyText(t).then((ok) => (ok ? toast('已复制打回清单') : manualCopy(t)));
 }
 
 /* ---------- 事件 ---------- */
@@ -401,4 +420,4 @@ document.addEventListener('selectionchange', () => {
     } catch { /* 忽略 */ }
   }, 180);
 });
-document.addEventListener('click', (e) => { const b = e.target.closest('[data-a="selclear"]'); if (b) { window.getSelection().removeAllRanges(); hideSel(); } });
+document.addEventListener('click', (e) => { if (e.target.closest('[data-a="mcclose"]')) { const m = $('manualcopy'); if (m) m.hidden = true; } const b = e.target.closest('[data-a="selclear"]'); if (b) { window.getSelection().removeAllRanges(); hideSel(); } });
