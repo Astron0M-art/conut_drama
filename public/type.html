@@ -25,6 +25,7 @@
 </header>
 
 <main>
+  <section class="workbench-import" id="workbenchImport" aria-label="直出平台导入进度" aria-live="polite" hidden></section>
   <section class="drop" id="drop" tabindex="0" role="button" aria-label="拖拽或点击上传剧本">
     <div class="drop-text"><strong>把剧本拖到这里</strong>，或点击选择文件</div>
     <div class="drop-sub">支持 .docx / .txt / .md · 一次最多 20 本，同时并发校验 · 单个 ≤ 30MB</div>
@@ -66,6 +67,7 @@
 </main>
 <footer>字数统计只在格式校验通过后进行。中文汉字、标点各计 1 字，夹杂英文每词计 1 字；括号外语翻译、△、数字、空白不计；场次头与「人物：」行默认不计，可在统计区勾选。</footer>
 <div class="toast" id="toast" role="status"></div>
+<script src="/workbench-import.js"></script>
 <script src="/type.js"></script>
 </body>
 </html>

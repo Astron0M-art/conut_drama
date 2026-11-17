@@ -26,6 +26,14 @@ npm start            # 等同 node server.js
 
 测试：`npm test`
 
+## 从直出平台导入 Word
+
+在 StoryPlay 直出平台勾选最多 20 本，点击导入后会打开 `/type`。已有登录会话时自动接收；未登录时先正常登录，原页面会等待并继续交接。仅传 Word，不传封面，不触发正文翻译。
+
+交接使用 `postMessage`，只在两个浏览器窗口之间传递 Word。统计页把收到的文件加入现有上传队列，继续使用相同的格式校验、修改、统计和导出。无需新增数据库或服务端文件存储；接收完成前保留原页面，刷新或关闭统计页后需要重新导入。
+
+`public/workbench-import.js` 校验打开窗口、精确来源、会话随机值、清单和文件大小；默认只接受本机 `127.0.0.1` / `localhost` 的 6985、6986 端口，以及 `http://82.157.198.44:8888`。更换直出平台域名时同步调整该白名单。
+
 ## 怎么分集、怎么数字
 
 - **正文范围**：先定位 `剧本正文` / `正文内容` / `正文` 标题，只统计该标题之后的内容。
@@ -65,6 +73,8 @@ npm start            # 等同 node server.js
 - 服务端解析跑在 worker 线程池里（CPU 核数，2–8 个），不阻塞主线程；排队上限 64，单 IP 同时 24 个请求，单文件 30MB，解析超时 20 秒。
 
 ## 部署（腾讯云轻量 · Ubuntu + systemd）
+
+本次工作台联动发布使用 `feat-workbench-word-handoff`，`main` 保持原样。服务器切到该功能分支后，后续更新请使用 `git pull --ff-only origin feat-workbench-word-handoff`，再执行测试并重启 `count-drama.service`；下方原 `deploy/update.sh` 仅适用于 `main`，不要用它更新功能分支。
 
 服务器上使用独立 Git 目录 `/opt/conut_drama`，由 systemd 托管（`deploy/count-drama.service`），
 Node 直接监听 80 端口，网页登录后使用。账号密码和签名密钥放在

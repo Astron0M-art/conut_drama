@@ -13,6 +13,32 @@ const countOf = (c, p) => c.pure + (S.incScene ? p.scene : 0) + (S.incCast ? p.c
 const modeText = () => (S.incScene || S.incCast ? `计入${[S.incScene && '场次头', S.incCast && '人物行'].filter(Boolean).join('、')}` : '不计场次头、人物行');
 const books = []; let cur = null; let seq = 0;
 
+const handoff = createWorkbenchReceiver({
+  window,
+  maxBooks: MAX_BOOKS,
+  existingCount: () => books.length,
+  addFile: (file) => addFiles([file], true)[0],
+  getProgress: (book) => {
+    if (book.status === 'queued') return { status: 'queued', stage: '等待校验' };
+    if (book.status === 'running') return { status: 'running', stage: '正在校验与统计' };
+    if (book.status === 'error') return { status: 'error', stage: '校验失败', error: book.error || '校验失败，请重新导入' };
+    if (!book.res?.format.ok || !book.res.analysis) return { status: 'error', stage: '格式需调整', error: (book.res?.format.issues || []).filter((issue) => issue.level === 'error').slice(0, 3).map((issue) => issue.message).join('；') || '请在下方修改格式后重新校验' };
+    return { status: 'done', stage: '统计完成' };
+  },
+  onChange: renderImport,
+  onError: toast,
+});
+window.addEventListener('pagehide', () => handoff.destroy(), { once: true });
+
+function renderImport(batch) {
+  const box = $('workbenchImport');
+  if (!batch) { box.hidden = true; return; }
+  const complete = batch.items.filter((item) => item.status === 'done').length;
+  const failed = batch.items.filter((item) => item.status === 'error').length;
+  box.hidden = false;
+  box.innerHTML = `<div class="import-head"><strong>从直出平台导入 ${batch.received} / ${batch.total} 本</strong><span>统计完成 ${complete} 本${failed ? ` · 需处理 ${failed} 本` : ''}</span></div><p>${batch.received === batch.total ? 'Word 已全部接收，可在下方查看、修改和导出。' : batch.sourceComplete ? '已接收的剧本继续统计；准备失败的剧本可在直出平台单独重试。' : '正在自动接收 Word，请保留直出平台原页面。准备好的剧本会先进入统计。'} 本次内容仅保留在当前页面，刷新后需重新导入。</p><ol>${batch.items.map((item) => `<li class="${item.status === 'error' ? 'bad' : ''}"><span>${esc(item.name.replace(/\.docx$/i, ''))}</span><small>${esc(item.stage)}${item.error ? `：${esc(item.error)}` : ''}</small></li>`).join('')}</ol>`;
+}
+
 function toast(msg) { const t = $('toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('show'), 3000); }
 
 async function call(url, opts) {
@@ -46,6 +72,7 @@ function pump() {
     const b = books.find((x) => x.status === 'queued');
     if (!b) return;
     b.status = 'running'; running++;
+    handoff.bookChanged(b);
     validateOne(b).finally(() => { running--; pump(); });
   }
 }
@@ -63,20 +90,22 @@ async function validateOne(b) {
       break;
     }
   } catch (e) { b.status = 'error'; b.error = e.message === 'Failed to fetch' ? '无法连接服务器' : e.message; }
+  handoff.bookChanged(b);
   if (!cur) select(b); else if (b === cur) select(b); else renderTabs();
   if (b === cur && b.status === 'done' && b.res.format.ok) setTimeout(() => $('count').scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
   if (b === cur && b.status === 'error') toast(`《${b.name}》${b.error}`);
 }
 
-function addFiles(list) {
+function addFiles(list, imported = false) {
   $('hint').hidden = true;
-  let skipped = 0; let over = 0; let dup = 0;
+  let skipped = 0; let over = 0; let dup = 0; const added = [];
   for (const f of [...list]) {
     const ext = (f.name.match(/\.[^.]+$/) || [''])[0].toLowerCase();
     if (!EXTS.includes(ext)) { skipped++; continue; }
-    if (books.some((b) => b.file.name === f.name && b.file.size === f.size)) { dup++; continue; }
-    if (books.length >= MAX_BOOKS) { over++; continue; }
-    books.push({ id: ++seq, file: f, name: f.name.replace(/\.[^.]+$/, ''), status: 'queued' });
+    if (!imported && books.some((b) => b.file.name === f.name && b.file.size === f.size)) { dup++; continue; }
+    if (books.length >= MAX_BOOKS - (imported ? 0 : handoff.reservedCount())) { over++; continue; }
+    const book = { id: ++seq, file: f, name: f.name.replace(/\.[^.]+$/, ''), status: 'queued' };
+    books.push(book); added.push(book);
   }
   const notes = [];
   if (over) notes.push(`最多同时 ${MAX_BOOKS} 本，已忽略 ${over} 个`);
@@ -85,15 +114,18 @@ function addFiles(list) {
   if (notes.length) toast(notes.join('；'));
   renderTabs(); pump();
   if (!cur && books.length) { /* 第一本校验完成后自动选中 */ }
+  return added;
 }
 
 async function recheck() {
   const d = await (await postJSON('/api/recheck', { name: S.name, paragraphs: S.paras })).json();
   S.res = d; S.marks = d.marks || {}; S.editing = -1; if (cur) { cur.res = d; cur.paras = S.paras; } render(); renderTabs();
+  if (cur) handoff.bookChanged(cur);
 }
 async function autofix() {
   const d = await (await postJSON('/api/fix', { name: S.name, paragraphs: S.paras })).json();
   S.paras = d.paragraphs; S.res = d; S.marks = d.marks || {}; S.editing = -1; if (cur) { cur.res = d; cur.paras = d.paragraphs; } render(); renderTabs();
+  if (cur) handoff.bookChanged(cur);
   toast(`已自动修复 ${d.applied} 处${d.format.ok ? '，格式通过，已进入字数统计' : `，还剩 ${d.format.errors} 个错误需手动处理`}`);
 }
 async function download() {
@@ -318,6 +350,7 @@ document.addEventListener('click', (e) => {
       e.stopPropagation();
       const k = books.findIndex((x) => x.id === Number(btn.dataset.id)); if (k < 0) return;
       const gone = books.splice(k, 1)[0];
+      gone.importRemoved = true; handoff.bookChanged(gone);
       if (gone === cur) { cur = null; books.length ? select(books[Math.min(k, books.length - 1)]) : (S.res = null, $('stage').hidden = true, $('steps').hidden = true, renderTabs()); } else renderTabs();
     }
     return;
