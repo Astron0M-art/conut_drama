@@ -9,9 +9,49 @@ const {
   localModel,
   getModelSpec,
   MODEL_OPTIONS,
+  LEVELS,
 } = require('../lib/translation-provider');
+const { normalizePayload, LANGUAGE_LEVELS } = require('../lib/translate');
 
 const originalFetch = global.fetch;
+
+test('菲律宾语和马来语归一化后使用准确 Coze 入参，提示词原样保留', async () => {
+  assert.strictEqual(LANGUAGE_LEVELS, LEVELS);
+  const source = '第1集\n甲：你好。';
+  const prompts = { system: '系统提示词\n保持原样。', user: '用户提示词\n{{content}}' };
+  const requests = [];
+  global.fetch = async (url, options) => {
+    requests.push(JSON.parse(options.body));
+    return new Response(
+      `event: Message\ndata: ${JSON.stringify({ content: JSON.stringify({ output: prompts }), node_is_finish: true, node_title: 'End' })}\n\nevent: Done\ndata: {"code":0}\n\n`,
+      { status: 200, headers: { 'content-type': 'text/event-stream' } },
+    );
+  };
+  try {
+    for (const [language, level] of [['菲律宾语', 'filipino'], ['马来语', 'malay']]) {
+      assert.equal(LEVELS[language], level);
+      for (const input of [language, level]) {
+        const job = normalizePayload({
+          name: '语言测试', paragraphs: source.split('\n'),
+          episodes: [{ episode: 1, text: source, paragraphIndexes: [0, 1] }],
+          targetLanguage: input, modelKey: 'ds-v4.1-flash',
+        });
+        assert.equal(job.targetLanguage, language);
+        assert.equal(job.targetLevel, level);
+        const prompt = await cozePrompt(job.episodes[0], job, {
+          cozeToken: 'coze-test-token', cozeEndpoint: 'https://coze.test/v1/workflow/stream_run', timeoutMs: 1000,
+        });
+        assert.equal(prompt.system, prompts.system);
+        assert.equal(prompt.user, prompts.user);
+        assert.equal(requests.at(-1).workflow_id, COZE_WORKFLOW_ID);
+        assert.deepEqual(requests.at(-1).parameters, { content: source, translateLevel: level });
+      }
+    }
+    assert.equal(requests.length, 4);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
 
 function restoreEnv(snapshot) {
   for (const [key, value] of Object.entries(snapshot)) {

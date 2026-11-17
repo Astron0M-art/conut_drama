@@ -4,9 +4,24 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const { LEVELS } = require('../lib/translation-provider');
 
 const ROOT = path.join(__dirname, '..');
 const read = (file) => fs.readFileSync(path.join(ROOT, file), 'utf8');
+
+test('唯一目标语言下拉框的八种语言与后端映射一致', () => {
+  const html = read('public/type-translate.html');
+  const controls = [...html.matchAll(/<select\b[^>]*\bid="targetLanguage"[^>]*>([\s\S]*?)<\/select>/g)];
+  assert.equal(controls.length, 1);
+  const options = [...controls[0][1].matchAll(/<option\b[^>]*\bvalue="([^"]+)"[^>]*>([^<]+)<\/option>/g)];
+  assert.equal(options.length, 8);
+  const languages = options.map((option) => option[1]);
+  assert.equal(new Set(languages).size, 8);
+  assert.deepEqual([...languages].sort(), Object.keys(LEVELS).sort());
+  for (const option of options) assert.equal(option[2].trim(), option[1]);
+  assert.ok(languages.includes('菲律宾语'));
+  assert.ok(languages.includes('马来语'));
+});
 
 test('正文翻译页是独立页面，并暴露两个静态入口', () => {
   const html = read('public/type-translate.html');
