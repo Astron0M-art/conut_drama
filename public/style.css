@@ -57,7 +57,11 @@ h1 em { font-style: normal; background: linear-gradient(transparent 62%, rgba(21
 .lead { margin: 12px 0 0; color: #d8d0c6; max-width: 640px; }
 .lead b { color: #fff; }
 .lead .rule { white-space: nowrap; color: #fff; background: var(--red); padding: 1px 8px; border-radius: 4px; font-variant-numeric: tabular-nums; }
-.logout { position: absolute; top: 14px; right: 20px; padding: 5px 14px; border: 1px solid rgba(255,255,255,.28); border-radius: 999px; background: rgba(255,255,255,.07); color: #e9e1d6; font-size: 13px; cursor: pointer; transition: background .15s, border-color .15s; }
+.hero-inner > div:not(.stamp) { flex: 1; min-width: 0; }
+/* 表头右上角导航：在布局流里，页面互跳 + 退出登录，永远不会互相叠压或盖住标题 */
+.hero-nav { display: flex; gap: 8px; align-items: center; flex: none; align-self: flex-start; margin-left: auto; }
+.hero-nav a { text-decoration: none; }
+.logout { display: inline-block; white-space: nowrap; padding: 5px 14px; border: 1px solid rgba(255,255,255,.28); border-radius: 999px; background: rgba(255,255,255,.07); color: #e9e1d6; font-size: 13px; cursor: pointer; transition: background .15s, border-color .15s; }
 .logout:hover { background: rgba(255,255,255,.16); border-color: rgba(255,255,255,.5); }
 
 /* ---------- drop ---------- */
@@ -176,6 +180,7 @@ footer { text-align: center; color: var(--muted); font-size: 12px; padding: 0 20
 
 @media (max-width: 720px) {
   .hero-inner { flex-direction: column; align-items: flex-start; gap: 16px; padding: 28px 16px 28px; }
+  .hero-nav { order: -1; align-self: flex-end; margin-left: 0; }
   .stamp { width: 84px; height: 84px; font-size: 28px; }
   main { padding: 0 16px 40px; }
   .summary { grid-template-columns: repeat(2, 1fr); }

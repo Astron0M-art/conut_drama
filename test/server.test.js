@@ -65,8 +65,10 @@ test('登录：错误密码 401；正确密码发 HttpOnly 会话 Cookie，凭�
   const cookie = cookieOf(ok);
 
   assert.strictEqual((await get('/', cookie)).status, 200);
-  assert.strictEqual((await get('/login', cookie)).headers.get('location'), '/'); // 已登录不再看登录页
+  assert.strictEqual((await get('/login', cookie)).headers.get('location'), '/type'); // 已登录不再看登录页
   assert.deepStrictEqual(await (await get('/api/me', cookie)).json(), { auth: true, user: 'admin' });
+  assert.strictEqual((await get('/type', cookie)).status, 200);
+  assert.match(await (await get('/type', cookie)).text(), /格式校验/);
 
   const r = await fetch(base + '/api/validate', { method: 'POST', headers: { Cookie: cookie, 'X-Filename': 'a.txt' }, body: '第1集\n△你好。\n' });
   assert.strictEqual(r.status, 200);

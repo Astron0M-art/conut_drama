@@ -8,6 +8,7 @@ const path = require('path');
 const { Pool } = require('./lib/pool');
 const { createAuth, Throttle } = require('./lib/auth');
 const fmt = require('./lib/format');
+const { createTranslationManager } = require('./lib/translate');
 
 const PORT = process.env.PORT === '0' ? 0 : Number(process.env.PORT) || 3000; // PORT=0：随机空闲端口（测试用）
 const HOST = process.env.HOST || '127.0.0.1';
@@ -35,13 +36,19 @@ if (!auth.enabled && !/^(127\.|localhost$|::1$)/.test(HOST)) {
 const pool = new Pool(Math.max(2, Math.min(os.cpus().length, 8)));
 const throttle = new Throttle(); // 登录失败限流：同一来源 15 分钟内最多失败 5 次
 const inflight = new Map();
+const translations = createTranslationManager();
 
 const PUBLIC = path.join(__dirname, 'public');
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml' };
 const statics = new Map();
 for (const f of fs.readdirSync(PUBLIC)) statics.set('/' + f, f);
 statics.set('/', 'type.html');
+// 统一把现有批量字数统计页挂在 /type，根路径保留为兼容入口；后续 type 页面可继续按同一命名扩展。
+statics.set('/type', 'type.html');
 statics.set('/login', 'login.html');
+// 正文翻译是独立页面，不复用 /type 的页面状态或脚本；保留两个入口便于书签和旧链接。
+statics.set('/type-translate', 'type-translate.html');
+statics.set('/translate', 'type-translate.html');
 statics.delete('/login.html');
 statics.delete('/type.html');
 statics.delete('/index.html');
@@ -138,6 +145,156 @@ function handleLogout(req, res) {
   send(res, 200, { ok: true }, undefined, { 'Cache-Control': 'no-store', 'Set-Cookie': sessionCookie(req, '', 0) });
 }
 
+const TRANSLATION_REQUEST_MAX = 24 * 1024 * 1024;
+
+function translationStatus(job) {
+  return {
+    jobId: job.id,
+    name: job.name,
+    status: job.status,
+    total: job.episodes.length,
+    completed: job.completed,
+    failed: job.failed,
+    queued: job.queued,
+    running: job.running,
+    currentEpisode: job.currentEpisode,
+    targetLanguage: job.targetLanguage,
+    modelKey: job.model.key,
+    // SSE 不可用时页面会轮询；把已完成的逐集结果一并带回，保持同一套预览/导出合同。
+    results: [...job.translations.entries()].map(([episode, translation]) => ({ episode, translation })),
+    episodeStatuses: [...job.episodeStatuses.entries()].map(([episode, status]) => ({ episode, status })),
+    error: job.error,
+    createdAt: job.createdAt,
+    finishedAt: job.finishedAt,
+  };
+}
+
+async function handleTranslationStart(req, res) {
+  let body;
+  try {
+    body = JSON.parse((await readBody(req, TRANSLATION_REQUEST_MAX, '翻译请求超过 24MB')).toString() || 'null');
+  } catch (e) {
+    return send(res, e.status || 400, { error: e.status ? e.message : '请求格式错误' });
+  }
+  try {
+    translations.preflight(body);
+    const created = translations.start(body);
+    return send(res, 202, created, undefined, { 'Cache-Control': 'no-store' });
+  } catch (e) {
+    return send(res, e.status || 400, { error: e.message || '翻译任务创建失败', code: e.code || 'translation_start_failed' });
+  }
+}
+
+function handleTranslationStatus(req, res, jobId) {
+  const job = translations.get(jobId);
+  if (!job) return send(res, 404, { error: '找不到翻译任务', code: 'translation_job_not_found' });
+  return send(res, 200, translationStatus(job), undefined, { 'Cache-Control': 'no-store' });
+}
+
+function writeTranslationEvent(res, event) {
+  if (!event) {
+    if (!res.writableEnded) res.end();
+    return;
+  }
+  if (res.writableEnded) return;
+  res.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
+}
+
+function handleTranslationEvents(req, res, jobId) {
+  const job = translations.get(jobId);
+  if (!job) return send(res, 404, { error: '找不到翻译任务', code: 'translation_job_not_found' });
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    'Cache-Control': 'no-cache, no-store',
+    Connection: 'keep-alive',
+    ...SECURITY,
+  });
+  res.flushHeaders?.();
+  res.write(': connected\n\n');
+  const heartbeat = setInterval(() => {
+    if (!res.writableEnded) res.write(': keepalive\n\n');
+  }, 15000);
+  let closed = false;
+  const finish = () => {
+    if (closed) return;
+    closed = true;
+    clearInterval(heartbeat);
+    translations.unsubscribe(jobId, listener);
+    if (!res.writableEnded) res.end();
+  };
+  const listener = (event) => {
+    if (event) writeTranslationEvent(res, event);
+    else finish();
+  };
+  translations.subscribe(jobId, listener);
+  req.on('close', finish);
+}
+
+function handleTranslationModels(req, res) {
+  return send(res, 200, translations.availability(), undefined, { 'Cache-Control': 'no-store' });
+}
+
+function handleTranslationCancel(req, res, jobId) {
+  try {
+    const job = translations.cancel(jobId);
+    return send(res, 200, translationStatus(job), undefined, { 'Cache-Control': 'no-store' });
+  } catch (e) {
+    return send(res, e.status || 500, { error: e.message || '停止失败', code: e.code || 'translation_cancel_failed' });
+  }
+}
+
+// 页面带着已完成的译文来导出：不依赖服务器任务，重启/过期/分批重试后依然能导出整本
+async function handleTranslationExportStateless(req, res) {
+  let body;
+  try {
+    body = JSON.parse((await readBody(req, TRANSLATION_REQUEST_MAX, '导出请求超过 24MB')).toString() || 'null');
+  } catch (e) {
+    return send(res, e.status || 400, { error: e.status ? e.message : '请求格式错误' });
+  }
+  try {
+    const out = translations.exportFromPayload(body);
+    const filename = encodeURIComponent(`${out.name || '剧本'}_${out.targetLanguage}_翻译.docx`);
+    return send(res, 200, out.buffer,
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      {
+        'Content-Disposition': `attachment; filename*=UTF-8''${filename}`, 'Cache-Control': 'no-store',
+        'X-Missing-Episodes': out.missingEpisodes.join(','),
+      });
+  } catch (e) {
+    return send(res, e.status || 500, { error: e.message || '翻译导出失败', code: e.code || 'translation_export_failed' });
+  }
+}
+
+async function handleTranslationExport(req, res, jobId) {
+  try {
+    let mode = 'replace';
+    if (req.method === 'POST') {
+      const raw = await readBody(req, 4096, '导出参数过大');
+      if (raw.length) {
+        let body;
+        try { body = JSON.parse(raw.toString() || '{}'); } catch { return send(res, 400, { error: '导出参数格式错误', code: 'translation_export_options_invalid' }); }
+        if (body && body.mode !== undefined && body.mode !== 'replace' && body.mode !== 'bilingual') {
+          return send(res, 400, { error: '导出方式只支持 replace 或 bilingual', code: 'translation_export_options_invalid' });
+        }
+        mode = body?.mode || mode;
+      }
+    }
+    const job = translations.get(jobId);
+    if (!job) return send(res, 404, { error: '找不到翻译任务', code: 'translation_job_not_found' });
+    const out = translations.export(jobId, { mode });
+    const filename = encodeURIComponent(`${job.name || '剧本'}_${job.targetLanguage}_翻译.docx`);
+    return send(res, 200, out.buffer,
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      { 'Content-Disposition': `attachment; filename*=UTF-8''${filename}`, 'Cache-Control': 'no-store' });
+  } catch (e) {
+    return send(res, e.status || 500, {
+      error: e.message || '翻译导出失败',
+      code: e.code || 'translation_export_failed',
+      ...(Array.isArray(e.missingEpisodes) ? { missingEpisodes: e.missingEpisodes } : {}),
+    });
+  }
+}
+
 // 校验链路：upload（文件 → 校验 → 通过才统计）、recheck / fix / export（JSON 段落数组，用于页面内修改后重验）
 async function handleFormat(req, res, kind) {
   const ip = clientIp(req);
@@ -187,14 +344,26 @@ function handle(req, res) {
   if (req.method === 'POST' && url === '/api/login') return handleLogin(req, res);
   if (req.method === 'POST' && url === '/api/logout') return handleLogout(req, res);
 
-  if (get && url === '/type') return redirect(res, '/');
-  if (get && url === '/login' && authed(req)) return redirect(res, '/'); // 已登录就不用再看登录页
+  if (get && url === '/login' && authed(req)) return redirect(res, '/type'); // 已登录就不用再看登录页
   if (get && OPEN.has(url)) return serveStatic(res, url);
 
   if (!authed(req)) {
     // 页面跳登录页；接口和其他资源直接 401
-    return get && url === '/' ? redirect(res, '/login') : send(res, 401, { error: '未登录' });
+    return get && (url === '/' || url === '/type' || url === '/type-translate' || url === '/translate')
+      ? redirect(res, '/login') : send(res, 401, { error: '未登录' });
   }
+
+  if (req.method === 'POST' && url === '/api/translate/start') return handleTranslationStart(req, res);
+  if (get && url === '/api/translate/models') return handleTranslationModels(req, res);
+  if (req.method === 'POST' && url === '/api/translate/export') return handleTranslationExportStateless(req, res);
+  const translationCancel = /^\/api\/translate\/([a-f0-9]{24})\/cancel$/.exec(url);
+  if (req.method === 'POST' && translationCancel) return handleTranslationCancel(req, res, translationCancel[1]);
+  const translationEvents = /^\/api\/translate\/([a-f0-9]{24})\/events$/.exec(url);
+  if (get && translationEvents) return handleTranslationEvents(req, res, translationEvents[1]);
+  const translationExport = /^\/api\/translate\/([a-f0-9]{24})\/export$/.exec(url);
+  if ((req.method === 'POST' || get) && translationExport) return handleTranslationExport(req, res, translationExport[1]);
+  const translationStatusMatch = /^\/api\/translate\/([a-f0-9]{24})$/.exec(url);
+  if (get && translationStatusMatch) return handleTranslationStatus(req, res, translationStatusMatch[1]);
 
   if (req.method === 'POST' && /^\/api\/(validate|recheck|fix|export|count)$/.test(url)) return handleFormat(req, res, url.slice(5));
   if (get && url === '/api/me') return send(res, 200, { auth: auth.enabled, user: auth.enabled ? auth.user : null }, undefined, { 'Cache-Control': 'no-store' });
