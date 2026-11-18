@@ -11,6 +11,7 @@
   const origins = new Set(options.origins || [
     'http://127.0.0.1:6985', 'http://localhost:6985',
     'http://127.0.0.1:6986', 'http://localhost:6986', 'http://82.157.198.44:8888',
+    'https://inner-drama.storyplay.cn',
   ]);
   const random = new Uint8Array(16);
   win.crypto.getRandomValues(random);

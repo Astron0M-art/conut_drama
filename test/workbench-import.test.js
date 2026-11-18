@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const { webcrypto } = require('node:crypto');
 const createReceiver = require('../public/workbench-import.js');
 const ORIGIN = 'http://127.0.0.1:6985';
+const PRODUCTION_ORIGIN = 'https://inner-drama.storyplay.cn';
 const NONCE = '1'.repeat(32);
 const envelope = (type, detail = {}, nonce = NONCE) => ({ channel: 'storyplay-word-handoff', version: 1, nonce, type, ...detail });
 const word = () => new Uint8Array([0x50, 0x4b, 3, 4, 1, 2]).buffer;
@@ -26,6 +27,9 @@ test('握手只回应精确白名单与打开本页的窗口，返回页面实�
   const t = setup();
   for (const [message, origin, source] of [
     [envelope('hello'), 'http://127.0.0.1:6985.evil.invalid', t.opener],
+    [envelope('hello'), 'https://inner-drama.storyplay.cn.evil.invalid', t.opener],
+    [envelope('hello'), 'http://inner-drama.storyplay.cn', t.opener],
+    [envelope('hello'), 'https://inner-drama.storyplay.cn:8443', t.opener],
     [envelope('hello'), ORIGIN, { postMessage() { throw Error('must not reply'); } }],
     [envelope('hello', {}, 'short'), ORIGIN, t.opener],
     [{ ...envelope('hello'), version: 2 }, ORIGIN, t.opener],
@@ -38,6 +42,20 @@ test('握手只回应精确白名单与打开本页的窗口，返回页面实�
   assert.equal(t.sent[0].message.type, 'ready');
   assert.match(t.sent[0].message.instance, /^[a-f0-9]{32}$/);
   assert.equal(t.receiver.snapshot(), null);
+});
+
+test('公网工作台可握手、提交清单和接收 Word，回执发回精确来源', () => {
+  const t = setup();
+  const send = (type, detail) => t.send(envelope(type, detail), PRODUCTION_ORIGIN);
+  send('hello');
+  assert.equal(t.sent.at(-1)?.message.type, 'ready');
+  send('begin', { items: [{ id: 'p-one', name: '第一本.docx' }] });
+  assert.equal(t.sent.at(-1).message.type, 'accept');
+  send('file', { id: 'p-one', name: '第一本.docx', size: 6, buffer: word() });
+  assert.equal(t.added.length, 1);
+  assert.equal(t.receiver.snapshot().received, 1);
+  assert.deepEqual(t.sent.map(({ message }) => message.type), ['ready', 'accept', 'ack', 'progress']);
+  assert.ok(t.sent.every(({ origin }) => origin === PRODUCTION_ORIGIN));
 });
 
 test('清单最多20本，重复begin幂等，名额包含已存在的手工上传', () => {
