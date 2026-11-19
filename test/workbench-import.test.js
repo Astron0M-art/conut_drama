@@ -58,23 +58,40 @@ test('公网工作台可握手、提交清单和接收 Word，回执发回精确
   assert.ok(t.sent.every(({ origin }) => origin === PRODUCTION_ORIGIN));
 });
 
-test('清单最多20本，重复begin幂等，名额包含已存在的手工上传', () => {
-  const t = setup(); const items = Array.from({ length: 20 }, (_, i) => ({ id: 'p-' + i, name: '剧本' + i + '.docx' }));
+test('清单最多100本，重复begin幂等，名额包含已存在的手工上传', () => {
+  const t = setup(); const items = Array.from({ length: 100 }, (_, i) => ({ id: 'p-' + i, name: '剧本' + i + '.docx' }));
   t.begin(items);
   assert.equal(t.sent.at(-1).message.type, 'accept');
-  assert.equal(t.receiver.reservedCount(), 20);
+  assert.equal(t.receiver.reservedCount(), 100);
   t.begin(items);
   assert.equal(t.sent.at(-1).message.type, 'accept');
   assert.equal(t.changes.length, 1);
   t.begin([{ id: 'changed', name: '修改.docx' }]);
   assert.equal(t.sent.at(-1).message.type, 'error');
-  assert.equal(t.receiver.snapshot().total, 20);
-  const over = setup(); over.begin([...items, { id: 'p-20', name: '多一本.docx' }]);
+  assert.equal(t.receiver.snapshot().total, 100);
+  const over = setup(); over.begin([...items, { id: 'p-100', name: '多一本.docx' }]);
   assert.equal(over.receiver.snapshot(), null);
   assert.equal(over.sent.at(-1).message.type, 'error');
   const occupied = setup(1); occupied.begin(items);
   assert.equal(occupied.receiver.snapshot(), null);
   assert.match(occupied.sent.at(-1).message.error, /先移除/);
+});
+
+test('100本交接入队即ACK，重复文件不占第二个名额，排队结果继续回传', () => {
+  const t = setup();
+  const items = Array.from({length:100}, (_, i) => ({id:'p-'+i,name:'剧本'+i+'.docx'}));
+  t.begin(items);
+  for (const item of items) {
+    const payload = {id:item.id,name:item.name,size:6,buffer:word()};
+    t.file(payload);
+    t.file({...payload,buffer:word()});
+  }
+  assert.equal(t.added.length,100);
+  assert.equal(t.receiver.reservedCount(),0);
+  assert.equal(t.receiver.snapshot().received,100);
+  assert.equal(t.sent.filter(x=>x.message.type==='ack').length,200);
+  for(const book of t.added) {book.status='done';book.stage='统计完成';t.receiver.bookChanged(book);}
+  assert.ok(t.receiver.snapshot().items.every(item=>item.status==='done'));
 });
 
 test('清单拒绝重复ID、非Word、路径名以及不合法大小', () => {

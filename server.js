@@ -9,6 +9,8 @@ const { Pool } = require('./lib/pool');
 const { createAuth, Throttle } = require('./lib/auth');
 const fmt = require('./lib/format');
 const { createTranslationManager } = require('./lib/translate');
+const { summarizeBooks } = require('./public/audit-summary');
+const { exportAuditXlsx } = require('./lib/audit-export');
 
 const PORT = process.env.PORT === '0' ? 0 : Number(process.env.PORT) || 3000; // PORT=0：随机空闲端口（测试用）
 const HOST = process.env.HOST || '127.0.0.1';
@@ -337,6 +339,26 @@ async function handleFormat(req, res, kind) {
   }
 }
 
+async function handleAuditExport(req, res) {
+  try {
+    const raw = await readBody(req, 8 * 1024 * 1024, '统计数据超过8MB，请减少集数后重试');
+    let body;
+    try { body = JSON.parse(raw.toString()); } catch { return send(res, 400, { error: '导出参数格式错误' }); }
+    if (!body || typeof body !== 'object' || !Array.isArray(body.books) || !body.books.length) {
+      return send(res, 400, { error: '请先导入需要审核的剧本' });
+    }
+    const summary = summarizeBooks(body.books, body.options);
+    const output = exportAuditXlsx(summary);
+    const filename = `剧本审核统计_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    return send(res, 200, output, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', {
+      'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`,
+      'Cache-Control': 'no-store',
+    });
+  } catch (error) {
+    return send(res, error.status || 400, { error: error.message || '导出Excel失败' });
+  }
+}
+
 function handle(req, res) {
   const url = req.url.split('?')[0];
   const get = req.method === 'GET';
@@ -352,6 +374,8 @@ function handle(req, res) {
     return get && (url === '/' || url === '/type' || url === '/type-translate' || url === '/translate')
       ? redirect(res, '/login') : send(res, 401, { error: '未登录' });
   }
+
+  if (req.method === 'POST' && url === '/api/audit/export') return handleAuditExport(req, res);
 
   if (req.method === 'POST' && url === '/api/translate/start') return handleTranslationStart(req, res);
   if (get && url === '/api/translate/models') return handleTranslationModels(req, res);

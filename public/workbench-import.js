@@ -5,7 +5,7 @@
 })(typeof globalThis !== 'undefined' ? globalThis : this, function createWorkbenchReceiver(options) {
   'use strict';
   const win = options.window;
-  const MAX = options.maxBooks || 20;
+  const MAX = options.maxBooks || 100;
   const MAX_FILE = 30 * 1024 * 1024;
   const CHANNEL = 'storyplay-word-handoff';
   const origins = new Set(options.origins || [
@@ -59,7 +59,7 @@
     }
     if (data.type === 'begin') {
       if (!Array.isArray(data.items) || !data.items.length || data.items.length > MAX || data.items.some((item) => !item || !validId(item.id) || !validName(item.name) || (item.size != null && !validSize(item.size))) || new Set(data.items.map((item) => item.id)).size !== data.items.length)
-        return invalid(event, data, '一次只能导入 1–20 本 Word，每本最多 30MB');
+        return invalid(event, data, `一次只能导入 1–${MAX} 本 Word，每本最多 30MB`);
       const manifest = JSON.stringify(data.items.map(({ id, name, size }) => ({ id, name, ...(size != null ? { size } : {}) })));
       if (session && session.nonce === data.nonce) {
         if (session.origin !== event.origin || session.source !== event.source) return invalid(event, data, '本次导入窗口已经改变，请重新发起导入');
@@ -67,7 +67,7 @@
         post(event.source, event.origin, data.nonce, 'accept', { instance });
         return;
       }
-      if (options.existingCount() + data.items.length > MAX) return invalid(event, data, '统计页最多保留 20 本，请先移除已有剧本或重新打开统计页');
+      if (options.existingCount() + data.items.length > MAX) return invalid(event, data, `统计页最多保留 ${MAX} 本，请先移除已有剧本或重新打开统计页`);
       session = { source: event.source, origin: event.origin, nonce: data.nonce, manifest,
         items: new Map(data.items.map((item) => [item.id, { name: item.name, ...(item.size != null ? { size: item.size } : {}) }])), received: new Map(), complete: false };
       changed();

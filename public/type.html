@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>格式校验 · 字数统计前置关卡</title>
+<title>剧本审计 · 格式校验与全本统计</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='28' fill='none' stroke='%23d4231f' stroke-width='5'/%3E%3Ctext x='32' y='43' font-size='30' font-weight='900' text-anchor='middle' fill='%23d4231f' font-family='serif'%3E格%3C/text%3E%3C/svg%3E">
 <link rel="stylesheet" href="/style.css">
 <link rel="stylesheet" href="/type.css">
@@ -14,8 +14,8 @@
     <div class="stamp" aria-hidden="true"><span>校验</span></div>
     <div>
       <p class="kicker">FORMAT GATE · WORD AUDIT</p>
-      <h1>格式校验<span class="sep">·</span><em>通过后统计字数</em></h1>
-      <p class="lead">先对照标准稿校验格式，<b>错误行标红并说明原因</b>，可在页面里直接改或一键修复；<b>格式通过</b>后才出逐集字数，<b class="rule" id="ruleText">550–1000</b> 之外标红打回。</p>
+      <h1>剧本审计<span class="sep">·</span><em>全本统计</em></h1>
+      <p class="lead">校验格式、逐集审核字数，再导出全本统计。<b>格式通过不代表字数合格</b>，<b class="rule" id="ruleText">550–1000</b> 之外标红打回。</p>
     </div>
     <nav class="hero-nav" aria-label="页面导航">
       <a class="logout" href="/type-translate" title="上传剧本后按集翻译正文并导出整本">正文翻译 →</a>
@@ -28,46 +28,52 @@
   <section class="workbench-import" id="workbenchImport" aria-label="直出平台导入进度" aria-live="polite" hidden></section>
   <section class="drop" id="drop" tabindex="0" role="button" aria-label="拖拽或点击上传剧本">
     <div class="drop-text"><strong>把剧本拖到这里</strong>，或点击选择文件</div>
-    <div class="drop-sub">支持 .docx / .txt / .md · 一次最多 20 本，同时并发校验 · 单个 ≤ 30MB</div>
+    <div class="drop-sub">支持 .docx / .txt / .md · 共可放入 100 本，按 2 本并行排队校验 · 单个 ≤ 30MB</div>
     <input id="file" type="file" accept=".docx,.txt,.md" multiple hidden>
   </section>
-  <section class="tabs" id="tabs" hidden></section>
-  <ol class="steps" id="steps" hidden>
-    <li id="st1"><i>1</i>格式校验</li><li class="arrow">→</li><li id="st2"><i>2</i>字数统计</li>
-  </ol>
+  <details class="guide-card" id="guideCard" open>
+    <summary>使用说明与统计规则<span class="guide-sub">上传前后均可查看 · 点击收起</span></summary>
+    <div class="guide-grid">
+      <section><h3>从导入到导出</h3><ol>
+        <li>拖入多本剧本，或从直出平台一键导入，共用本页的 100 本容量。</li>
+        <li><b>① 格式校验</b>查看处理进度和错误；点击文档行修改，或一键修复。</li>
+        <li><b>② 逐本审计</b>查看逐集字数；点击异常集定位正文，修改后重新校验，可下载标准格式 DOCX。</li>
+        <li><b>③ 全本统计</b>汇总所有剧本，点击剧名返回逐本审计，可下载 Excel；未完成和失败的剧本也会列明状态。</li>
+      </ol><p class="g-note">格式通过与字数合格分别判断。修改中的旧统计暂不参与汇总；本次内容只保留在当前页面，刷新后需重新导入。</p></section>
+      <section><h3>只统计剧本正文</h3><p>标准结构：《剧名》→ 故事梗概 → 人物小传 → 分集大纲 → 正文内容。正文前的梗概、人物小传和大纲不计。</p><ul>
+        <li>中文汉字、标点各计 1 字，夹杂英文每词计 1 字；英文剧本按词统计。</li>
+        <li><s class="tr">(La dosis es suficiente.)</s> 括号外语翻译、△、数字、空白不计。</li>
+        <li>场次头和「人物：」行默认不计，可在统计口径中勾选；所有剧本与 Excel 同步使用该口径。</li>
+        <li>文档中框选文字可查看选中字数；左侧定位轴可快速跳转。</li>
+      </ul></section>
+    </div>
+  </details>
+  <nav class="steps" id="steps" aria-label="审计步骤" role="tablist">
+    <button id="st1" role="tab" aria-selected="true" aria-controls="formatOverview" data-a="step" data-step="1"><i>1</i>格式校验</button>
+    <button id="st2" role="tab" aria-selected="false" aria-controls="stage" data-a="step" data-step="2"><i>2</i>逐本审计</button>
+    <button id="st3" role="tab" aria-selected="false" aria-controls="allStats" data-a="step" data-step="3"><i>3</i>全本统计</button>
+  </nav>
+  <section id="ruleControls" class="audit-rules" aria-label="全部剧本的统计口径" hidden>
+    <div><strong>统一统计口径</strong><label class="opt"><input type="checkbox" id="incScene">计入场次头</label><label class="opt"><input type="checkbox" id="incCast">计入人物行</label></div>
+    <label class="range">合格区间 <input id="min" type="number" min="0" value="550" aria-label="合格字数下限"><span>–</span><input id="max" type="number" min="1" value="1000" aria-label="合格字数上限"><span>字 / 词</span></label>
+  </section>
+  <section id="formatOverview" class="format-overview" aria-label="全部剧本格式校验进度"></section>
+  <section class="tabs" id="tabs" aria-label="选择剧本" hidden></section>
+  <p id="bookEmpty" class="empty-hint">导入剧本后，在这里查看校验结果。</p>
   <div id="stage" hidden>
     <section class="statusbar" id="statusbar"></section>
+    <section id="count" hidden></section>
     <div class="cols">
       <nav class="minimap" id="minimap" aria-label="缩略定位"></nav>
       <aside class="side" id="side"></aside>
       <section class="paper-wrap"><div class="paper" id="paper"></div></section>
-      <aside class="guide" id="guide">
-        <h3>使用说明</h3>
-        <ol>
-          <li><b>红色柱子 / 红色卡片</b>是字数超出 550–1000 的集，<b>点一下</b>，右侧文档会自动定位到该集（居中显示）。</li>
-          <li>左侧窄条是<b>缩略定位轴</b>：红线是错误位置，点击或拖动可快速跳转。</li>
-          <li>在文档里<b>鼠标框选</b>文字，右侧会出现大号数字，实时显示选中部分的字数。</li>
-          <li>点任意一行可直接修改；顶部「一键自动修复」可补集标题、改集号。</li>
-        </ol>
-        <h3>什么不算字数</h3>
-        <ul class="nocount">
-          <li><s class="tr">(La dosis es suficiente.)</s> 括号里的<b>外语翻译</b>（灰色删除线标出）</li>
-          <li><b>人物：</b>纪衡、温禾…这一整行（默认不计，可勾选）</li>
-          <li><b>场次头</b>如 11-1 夜 内 闻家老宅·西偏院书房，含地点（默认不计，可勾选）</li>
-          <li><b>△</b> 动作符号本身</li>
-          <li><b>数字、空白</b></li>
-          <li>「正文内容」<b>之前</b>的梗概、人物小传、大纲</li>
-        </ul>
-        <p class="g-note">不计字数的场次头、人物行在文档里标灰；勾选统计区的「哪些算字数」可改变口径，各集字数立即刷新。</p>
-      </aside>
     </div>
-    <section id="count"></section>
   </div>
-  <p class="empty-hint" id="hint">标准格式：《剧名》→ 故事梗概 → 人物小传 → 分集大纲·粗纲 → 分集大纲·集纲 → 正文内容（第N集 / N-M 场次头 / 人物 / △动作 / 台词）</p>
+  <section id="allStats" class="all-stats" aria-label="全本统计" hidden></section>
 </main>
-<footer>字数统计只在格式校验通过后进行。中文汉字、标点各计 1 字，夹杂英文每词计 1 字；括号外语翻译、△、数字、空白不计；场次头与「人物：」行默认不计，可在统计区勾选。</footer>
 <div class="toast" id="toast" role="status"></div>
 <script src="/workbench-import.js"></script>
+<script src="/audit-summary.js"></script>
 <script src="/type.js"></script>
 </body>
 </html>

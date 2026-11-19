@@ -3,11 +3,11 @@
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmt = (n) => n.toLocaleString('zh-CN');
-const MAX_BOOKS = 20;
-const CONCURRENCY = 20;
+const MAX_BOOKS = 100;
+const CONCURRENCY = 2;
 const EXTS = ['.docx', '.txt', '.md'];
 // S 是「当前选中那一本」的视图；books 保存每本的状态
-const S = { marks: {}, showTr: true, name: '', paras: [], res: null, editing: -1, onlyBad: false, min: 550, max: 1000, incScene: false, incCast: false, busy: false };
+const S = { marks: {}, showTr: true, name: '', paras: [], res: null, editing: -1, onlyBad: false, min: 550, max: 1000, incScene: false, incCast: false, view: 1, exporting: false, expandedSummary: new Set() };
 // 字数 = 台词与动作 +（可选）场次头 +（可选）人物行；默认两者都不计
 const countOf = (c, p) => c.pure + (S.incScene ? p.scene : 0) + (S.incCast ? p.cast : 0);
 const modeText = () => (S.incScene || S.incCast ? `计入${[S.incScene && '场次头', S.incCast && '人物行'].filter(Boolean).join('、')}` : '不计场次头、人物行');
@@ -19,6 +19,8 @@ const handoff = createWorkbenchReceiver({
   existingCount: () => books.length,
   addFile: (file) => addFiles([file], true)[0],
   getProgress: (book) => {
+    if (book.rechecking) return { status: 'running', stage: '正在重新校验' };
+    if (book.dirty) return { status: 'error', stage: '修改后待校验', error: book.error || '修改后的正文尚未通过重新校验' };
     if (book.status === 'queued') return { status: 'queued', stage: '等待校验' };
     if (book.status === 'running') return { status: 'running', stage: '正在校验与统计' };
     if (book.status === 'error') return { status: 'error', stage: '校验失败', error: book.error || '校验失败，请重新导入' };
@@ -50,20 +52,87 @@ async function call(url, opts) {
 const postJSON = (url, body) => call(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 
 function select(b) {
-  if (cur) { cur.paras = S.paras; cur.res = S.res; cur.onlyBad = S.onlyBad; }
+  if (!books.includes(b)) return;
+  if (cur) cur.onlyBad = S.onlyBad;
   cur = b;
-  S.name = b.name; S.paras = b.paras || []; S.res = b.res || null; S.marks = (b.res && b.res.marks) || {}; S.editing = -1; S.onlyBad = !!b.onlyBad;
-  renderTabs();
-  if (b.status === 'done' && S.res) render(); else { $('stage').hidden = true; $('steps').hidden = true; }
+  loadCurrent();
+  refreshBooks();
+  render();
+}
+
+function loadCurrent() {
+  S.name = cur?.name || ''; S.paras = cur?.paras || []; S.res = cur?.res || null;
+  S.marks = S.res?.marks || {}; S.editing = cur?.editDraft?.para ?? -1; S.onlyBad = !!cur?.onlyBad;
+}
+
+const auditOptions = () => ({ min: S.min, max: S.max, incScene: S.incScene, incCast: S.incCast });
+const summaryData = () => AuditSummary.summarizeBooks(books, auditOptions());
+const pendingBook = (b) => !!(b && (b.dirty || b.rechecking || b.status === 'queued' || b.status === 'running'));
+
+function refreshBooks() {
+  renderTabs(); renderFormatOverview(); renderSummary(); setSteps();
+}
+
+function showStep(step) {
+  S.view = [1, 2, 3].includes(Number(step)) ? Number(step) : 1;
+  refreshBooks();
+  if (S.view !== 3) render();
+  hideSel();
+  if (S.view !== 3 && S.res) requestAnimationFrame(buildMinimap);
 }
 
 function renderTabs() {
-  $('tabs').hidden = books.length === 0;
-  const label = { queued: ['排队', 'run'], running: ['校验中', 'run'], error: ['失败', 'bad'] };
-  $('tabs').innerHTML = (books.length > 1 ? `<span class="chip" style="align-self:center">共 ${books.length} 本 · 通过 <b>${books.filter((b) => b.res && b.res.format.ok).length}</b> · 待处理 <b>${books.filter((b) => b.status === 'done' && !b.res.format.ok).length}</b></span>` : '') + books.map((b) => {
-    const st = b.status === 'done' ? (b.res.format.ok ? ['通过', 'ok'] : [`${b.res.format.errors} 错`, 'bad']) : label[b.status];
-    return `<div class="tab ${b === cur ? 'cur' : ''}" data-a="tab" data-id="${b.id}" title="${esc(b.file.name)}"><span class="nm">${esc(b.name)}</span><span class="st ${st[1]}">${st[0]}</span><button class="x" data-a="rm" data-id="${b.id}" title="移除">×</button></div>`;
+  $('tabs').hidden = books.length === 0 || S.view === 3;
+  const label = { queued: ['排队', 'run'], running: ['校验中', 'run'], rechecking: ['重校验中', 'run'], error: ['校验失败', 'bad'] };
+  $('tabs').innerHTML = books.map((b) => {
+    const st = b.rechecking ? label.rechecking : b.dirty ? ['修改待校验', 'run'] : b.status === 'done' ? (b.res?.format.ok ? ['格式通过', 'ok'] : [`格式 ${b.res?.format.errors || 0} 错`, 'bad']) : label[b.status] || label.error;
+    return `<div class="tab ${b === cur ? 'cur' : ''}"><button class="tab-select" data-a="tab" data-id="${b.id}" title="${esc(b.file.name)}" aria-pressed="${b === cur}"><span class="nm">${esc(b.name)}</span><span class="st ${st[1]}">${st[0]}</span></button><button class="x" data-a="rm" data-id="${b.id}" title="移除《${esc(b.name)}》">×</button></div>`;
   }).join('');
+}
+
+function renderFormatOverview() {
+  if (S.view !== 1) return;
+  const data = summaryData();
+  const passed = books.filter((b) => !pendingBook(b) && b.status === 'done' && b.res?.format.ok).length;
+  $('formatOverview').innerHTML = `<div class="overview-head"><div><h2>格式校验</h2><p>已导入 ${books.length} / ${MAX_BOOKS} 本 · 格式通过 ${passed} 本 · ${data.totals.pending} 本等待或处理中</p></div><button class="btn ghost" data-a="step" data-step="3" ${books.length ? '' : 'disabled'}>查看全本统计 →</button></div>${books.length ? '<p class="overview-note">上方每本按队列自动校验。选择下方剧本可查看问题和修改；“格式通过”只表示结构通过，字数是否合格请进入逐本审计。</p>' : '<p class="overview-note">拖入剧本或从直出平台导入后自动开始，每次并行处理 2 本。</p>'}`;
+}
+
+function renderSummary() {
+  if (S.view !== 3) return;
+  const data = summaryData();
+  const cell = (value) => value == null ? '—' : fmt(value);
+  const rows = data.books.map((b) => {
+    const bad = b.badEpisodes || [];
+    const expanded = S.expandedSummary.has(b.id);
+    const visibleBad = expanded ? bad : bad.slice(0, 3);
+    const toggle = bad.length > 3 ? `<button class="summary-toggle" data-a="summary-toggle" data-id="${b.id}" aria-expanded="${expanded}" aria-label="${esc(b.name)}：${expanded ? '收起异常集明细' : '展开全部异常集明细'}">${expanded ? '收起明细' : `展开其余 ${bad.length - 3} 集`}</button>` : '';
+    const notes = (b.issues || []).map((issue) => issue.text).filter(Boolean).join('；');
+    return `<tr class="${b.passed === false ? 'bad' : ''}"><td><button class="book-link" data-a="audit-book" data-id="${b.id}">${esc(b.name)}</button><small class="summary-status ${b.passed === true ? 'ok' : ''}">${esc(b.label)}${b.passed == null ? ' · 暂不计入字数结论' : ''}</small>${notes ? `<small class="summary-note">${esc(notes)}</small>` : ''}</td><td>${cell(b.totalEpisodes)}</td><td>${bad.length ? visibleBad.map((e) => `<div class="summary-line">第${e.no}集 <span class="tag">${esc(e.label)}</span></div>`).join('') + toggle : b.passed === true ? '无' : '—'}</td><td>${bad.length ? visibleBad.map((e) => `<div class="summary-line">${fmt(e.n)} ${b.unit}</div>`).join('') : '—'}</td></tr>`;
+  }).join('');
+  $('allStats').innerHTML = `<div class="overview-head"><div><h2>全本统计</h2><p>共 ${data.totals.books} 本 · 可统计 ${data.totals.ready} 本 · 字数合格 ${data.totals.qualified} 本 · 需处理 ${data.totals.needsWork} 本</p></div><button class="btn" data-a="excel" ${!books.length || S.exporting ? 'disabled' : ''}>${S.exporting ? '正在导出…' : '下载 Excel'}</button></div><p class="overview-note">统计范围：当前页面所有剧本。超标集包含字数不足、超限和空集；格式未通过、修改中、排队和失败的剧本保留状态。点击剧名可回到逐本审计。</p>${books.length ? `<div class="tbl-wrap summary-table"><table class="tbl"><thead><tr><th>剧本名称</th><th>剧本总集数</th><th>超标集</th><th>超标集字数</th></tr></thead><tbody>${rows}</tbody></table></div>` : '<p class="summary-empty">尚未导入剧本，导入后会自动在这里汇总。</p>'}`;
+}
+
+async function downloadSummary() {
+  if (!books.length || S.exporting) return;
+  const data = summaryData();
+  const incomplete = data.books.filter((b) => b.passed == null);
+  if (incomplete.length && !window.confirm(`还有 ${incomplete.length} 本尚无有效统计结果，Excel 会保留这些剧本及当前状态。是否导出当前全部 ${books.length} 本？`)) return;
+  const payload = {
+    books: books.map((b) => ({ id: b.id, name: b.name, status: b.status, error: b.error, dirty: b.dirty, rechecking: b.rechecking, format: b.res?.format && { ok: b.res.format.ok, errors: b.res.format.errors, warns: b.res.format.warns }, analysis: b.res?.analysis })),
+    options: auditOptions(),
+  };
+  S.exporting = true; renderSummary();
+  try {
+    const r = await postJSON('/api/audit/export', payload);
+    saveBlob(await r.blob(), '全本统计.xlsx');
+    toast(`已导出 ${payload.books.length} 本剧本的统计`);
+  } catch (e) { toast(e.message); }
+  finally { S.exporting = false; renderSummary(); }
+}
+
+function saveBlob(blob, filename) {
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = filename; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 
 let running = 0;
@@ -78,7 +147,8 @@ function pump() {
 }
 
 async function validateOne(b) {
-  renderTabs();
+  const revision = b.revision;
+  refreshBooks();
   try {
     for (let attempt = 0; ; attempt++) {
       const r = await fetch('/api/validate', { method: 'POST', headers: { 'X-Filename': encodeURIComponent(b.file.name), 'Content-Type': 'application/octet-stream' }, body: b.file });
@@ -86,53 +156,83 @@ async function validateOne(b) {
       if (r.status === 401) { location.href = '/login?expired=1'; throw new Error('登录已过期'); }
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d.error || `服务器返回 ${r.status}`);
-      b.name = d.name; b.paras = d.paragraphs; b.res = d; b.status = 'done';
+      if (!books.includes(b) || b.revision !== revision) return;
+      b.name = d.name; b.paras = d.paragraphs; b.res = d; b.status = 'done'; b.error = ''; b.dirty = false;
       break;
     }
-  } catch (e) { b.status = 'error'; b.error = e.message === 'Failed to fetch' ? '无法连接服务器' : e.message; }
+  } catch (e) { if (!books.includes(b) || b.revision !== revision) return; b.status = 'error'; b.error = e.message === 'Failed to fetch' ? '无法连接服务器' : e.message; }
+  if (!books.includes(b)) return;
   handoff.bookChanged(b);
-  if (!cur) select(b); else if (b === cur) select(b); else renderTabs();
-  if (b === cur && b.status === 'done' && b.res.format.ok) setTimeout(() => $('count').scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
+  if (!cur) select(b); else if (b === cur) { loadCurrent(); render(); }
+  refreshBooks();
   if (b === cur && b.status === 'error') toast(`《${b.name}》${b.error}`);
 }
 
 function addFiles(list, imported = false) {
-  $('hint').hidden = true;
-  let skipped = 0; let over = 0; let dup = 0; const added = [];
+  let skipped = 0; let over = 0; let dup = 0; let oversize = 0; const added = [];
   for (const f of [...list]) {
     const ext = (f.name.match(/\.[^.]+$/) || [''])[0].toLowerCase();
     if (!EXTS.includes(ext)) { skipped++; continue; }
+    if (f.size > 30 * 1024 * 1024) { oversize++; continue; }
     if (!imported && books.some((b) => b.file.name === f.name && b.file.size === f.size)) { dup++; continue; }
     if (books.length >= MAX_BOOKS - (imported ? 0 : handoff.reservedCount())) { over++; continue; }
-    const book = { id: ++seq, file: f, name: f.name.replace(/\.[^.]+$/, ''), status: 'queued' };
-    books.push(book); added.push(book);
+    const book = { id: ++seq, file: f, name: f.name.replace(/\.[^.]+$/, ''), status: 'queued', revision: 0, requestVersion: 0, dirty: false, rechecking: false };
+    books.unshift(book); added.push(book);
   }
   const notes = [];
   if (over) notes.push(`最多同时 ${MAX_BOOKS} 本，已忽略 ${over} 个`);
   if (skipped) notes.push(`${skipped} 个文件格式不支持`);
   if (dup) notes.push(`${dup} 个文件已在列表中`);
+  if (oversize) notes.push(`${oversize} 个文件超过 30MB`);
   if (notes.length) toast(notes.join('；'));
-  renderTabs(); pump();
+  refreshBooks(); pump();
   if (!cur && books.length) { /* 第一本校验完成后自动选中 */ }
   return added;
 }
 
-async function recheck() {
-  const d = await (await postJSON('/api/recheck', { name: S.name, paragraphs: S.paras })).json();
-  S.res = d; S.marks = d.marks || {}; S.editing = -1; if (cur) { cur.res = d; cur.paras = S.paras; } render(); renderTabs();
-  if (cur) handoff.bookChanged(cur);
+function commitDraft(b) {
+  if (!b?.editDraft) return;
+  const draft = b.editDraft;
+  const text = draft.text.split('\n').map((x) => x.trim()).filter(Boolean).join('\n');
+  if (text && text !== b.paras[draft.para]) { b.paras[draft.para] = text; b.dirty = true; b.revision++; }
+  else b.dirty = draft.beforeDirty;
+  b.editDraft = null;
 }
-async function autofix() {
-  const d = await (await postJSON('/api/fix', { name: S.name, paragraphs: S.paras })).json();
-  S.paras = d.paragraphs; S.res = d; S.marks = d.marks || {}; S.editing = -1; if (cur) { cur.res = d; cur.paras = d.paragraphs; } render(); renderTabs();
-  if (cur) handoff.bookChanged(cur);
-  toast(`已自动修复 ${d.applied} 处${d.format.ok ? '，格式通过，已进入字数统计' : `，还剩 ${d.format.errors} 个错误需手动处理`}`);
-}
-async function download() {
+async function checkBook(b, fix = false) {
+  if (!b || !books.includes(b) || b.rechecking || !b.paras) return;
+  commitDraft(b);
+  if (b.dirty) b.onlyBad = false;
+  const revision = b.revision; const requestVersion = ++b.requestVersion;
+  const paragraphs = b.paras.slice(); const name = b.name;
+  b.rechecking = true; b.status = 'rechecking'; b.error = '';
+  if (b === cur) { loadCurrent(); render(); }
+  refreshBooks(); handoff.bookChanged(b);
   try {
-    const r = await postJSON('/api/export', { name: S.name, paragraphs: S.paras });
-    const a = document.createElement('a'); a.href = URL.createObjectURL(await r.blob()); a.download = `${S.name}_标准格式.docx`; a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    const d = await (await postJSON(fix ? '/api/fix' : '/api/recheck', { name, paragraphs })).json();
+    if (!books.includes(b) || b.revision !== revision || b.requestVersion !== requestVersion) return;
+    b.paras = d.paragraphs || paragraphs; b.res = d; b.status = 'done'; b.dirty = false; b.error = '';
+    if (fix) toast(`《${name}》已修复 ${d.applied} 处${d.format.ok ? '，格式通过' : `，还剩 ${d.format.errors} 个错误`}`);
+  } catch (e) {
+    if (!books.includes(b) || b.revision !== revision || b.requestVersion !== requestVersion) return;
+    b.status = 'error'; b.dirty = true; b.error = e.message; toast(`《${name}》${e.message}`);
+  } finally {
+    if (books.includes(b) && b.requestVersion === requestVersion) {
+      b.rechecking = false;
+      if (b.revision !== revision && b.status === 'rechecking') { b.status = 'done'; b.dirty = true; }
+      if (b === cur) { loadCurrent(); render(); }
+      handoff.bookChanged(b); refreshBooks();
+    }
+  }
+}
+const recheck = () => checkBook(cur);
+const autofix = () => checkBook(cur, true);
+async function download() {
+  const b = cur;
+  if (!b || pendingBook(b) || b.status !== 'done' || !b.res?.format.ok) return toast('请先保存修改并完成格式校验');
+  try {
+    const name = b.name; const paragraphs = b.paras.slice();
+    const r = await postJSON('/api/export', { name, paragraphs });
+    saveBlob(await r.blob(), `${name}_标准格式.docx`);
   } catch (e) { toast(e.message); }
 }
 
@@ -143,7 +243,7 @@ function paraHTML(b) {
   const cls = ['p', b.kind, b.kind === 'title' ? 'title' : '', b.kind === 'h2' ? 'h2' : '', issues.length ? (hasErr ? 'bad' : 'warnrow') : '', (b.kind === 'scene' && !S.incScene) || (b.kind === 'cast' && !S.incCast) ? 'nc' : ''].join(' ');
   let inner;
   if (S.editing === b.para) {
-    return `<div class="${cls}" id="p${b.para}"><textarea id="ta" rows="${Math.min(8, b.text.split('\n').length + 1)}">${esc(b.text)}</textarea>
+    return `<div class="${cls}" id="p${b.para}"><textarea id="ta" rows="${Math.min(8, b.text.split('\n').length + 1)}">${esc(cur?.editDraft?.text ?? b.text)}</textarea>
       <div class="rowact"><button data-a="save" data-i="${b.para}">保存</button><button data-a="cancel">取消</button><button data-a="del" data-i="${b.para}">删除本行</button><button data-a="addafter" data-i="${b.para}">下方新增一行</button></div></div>`;
   }
   const m = /^([^：\n]*：)([\s\S]*)$/.exec(b.text);
@@ -169,7 +269,7 @@ function markTranslations(b, html) {
 
 // 空行位置与导出的标准 docx 保持一致
 function paperHTML() {
-  const blocks = S.res.format.blocks;
+  const blocks = cur?.dirty && !cur.editDraft ? S.paras.map((text, para) => ({ text, para, kind: 'text', issues: [] })) : S.res.format.blocks;
   const out = [];
   const sp = '<div class="sp"></div>';
   let prevSection = ''; let seenName = false; let sceneInEp = 0; let prevKind = '';
@@ -194,22 +294,26 @@ function paperHTML() {
 }
 
 function render() {
-  const r = S.res; if (!r) return;
+  setSteps();
+  const r = S.res; if (!r || S.view === 3) return;
   const f = r.format;
-  $('stage').hidden = false;
+  const pending = pendingBook(cur); const busy = !!cur?.rechecking;
   const paraIssues = f.issues.filter((x) => x.para != null);
   const global = f.issues.filter((x) => x.para == null);
-  $('statusbar').className = `statusbar ${f.ok ? 'pass' : 'fail'}`;
-  $('statusbar').innerHTML = `<div class="t">${f.ok ? '✓ 格式通过' : '✗ 格式未通过，暂不统计字数'}<small>《${esc(S.name)}》 · ${S.paras.length} 段 · 错误 ${f.errors} · 提示 ${f.warns}</small></div>
+  $('statusbar').className = `statusbar ${pending ? '' : f.ok ? 'pass' : 'fail'}`;
+  const status = busy ? '正在重新校验，旧统计暂不参与汇总' : cur?.dirty ? (cur.error ? `校验失败：${esc(cur.error)}，请重新校验` : '正文已修改，请保存并重新校验') : f.ok ? '✓ 格式通过 · 字数是否合格请查看逐本审计' : '✗ 格式未通过，暂不统计字数';
+  $('statusbar').innerHTML = `<div class="t">${status}<small>《${esc(S.name)}》 · ${S.paras.length} 段${pending ? '' : ` · 错误 ${f.errors} · 提示 ${f.warns}`}</small></div>
     <label class="chk"><input type="checkbox" id="onlyBad" ${S.onlyBad ? 'checked' : ''}>只看有问题的行</label>
     <label class="chk" title="被判为外语翻译的括号内容，不计字数"><input type="checkbox" id="showTr" ${S.showTr ? 'checked' : ''}>标出不计字数的翻译（${Object.values(S.marks || {}).reduce((n, m) => n + m.length, 0)} 处）</label>
-    ${f.fixable ? `<button class="btn" data-a="autofix">一键自动修复（${f.fixable}）</button>` : ''}
-    <button class="btn ghost" data-a="recheck">重新校验</button>
-    <button class="btn ${f.ok ? '' : 'ghost'}" data-a="download" ${f.ok ? '' : 'disabled title="格式通过后才能导出标准 docx"'}>下载标准格式 docx</button>`;
+    ${f.fixable && !cur?.dirty ? `<button class="btn" data-a="autofix" ${busy ? 'disabled' : ''}>一键自动修复（${f.fixable}）</button>` : ''}
+    <button class="btn ghost" data-a="recheck" ${busy ? 'disabled' : ''}>${busy ? '重新校验中…' : '重新校验'}</button>
+    <button class="btn ${f.ok && !pending ? '' : 'ghost'}" data-a="download" ${f.ok && !pending && cur.status === 'done' ? '' : 'disabled title="保存修改并通过格式校验后可导出"'}>下载标准格式 docx</button>`;
   const list = (arr) => arr.map((x) => `<button class="issue ${x.level}" data-a="goto" data-p="${x.para ?? ''}"><span class="lv">${x.level === 'error' ? '错误' : '提示'}</span>${esc(x.message)}${x.fixable ? '<span class="fx">可自动修复</span>' : ''}${x.para != null ? `<div class="ln">第 ${x.para + 1} 行：${esc((S.paras[x.para] || '').slice(0, 30))}</div>` : ''}</button>`).join('');
   const cap = 200;
-  $('side').innerHTML = `<h3>问题清单（${f.issues.length}）</h3>${f.ok && !f.issues.length ? '<p class="empty-hint" style="padding:12px 0">没有问题。</p>' : ''}${list(global)}${list(paraIssues.slice(0, cap))}${paraIssues.length > cap ? `<p class="ln">仅显示前 ${cap} 条，其余请在右侧文档中查看。</p>` : ''}`;
+  $('side').innerHTML = pending ? '<h3>正文正在更新</h3><p class="overview-note">重新校验完成后更新问题清单与字数。可以切换到其他剧本继续查看。</p>' : `<h3>问题清单（${f.issues.length}）</h3>${f.ok && !f.issues.length ? '<p class="empty-hint" style="padding:12px 0">没有问题。</p>' : ''}${list(global)}${list(paraIssues.slice(0, cap))}${paraIssues.length > cap ? `<p class="ln">仅显示前 ${cap} 条，其余请在右侧文档中查看。</p>` : ''}`;
   $('paper').innerHTML = paperHTML();
+  $('paper').setAttribute('aria-busy', String(busy));
+  $('paper').classList.toggle('is-checking', busy);
   renderCount();
   buildMinimap();
 }
@@ -237,29 +341,35 @@ function chartHTML(eps, unit) {
 }
 
 function setSteps() {
-  const ok = S.res && S.res.format.ok;
-  $('steps').hidden = !S.res;
-  $('st1').className = ok ? 'done' : 'fail';
-  $('st2').className = ok ? 'cur' : '';
+  for (const n of [1, 2, 3]) {
+    $('st' + n).className = S.view === n ? 'cur' : '';
+    $('st' + n).setAttribute('aria-selected', String(S.view === n));
+  }
+  $('formatOverview').hidden = S.view !== 1;
+  $('ruleControls').hidden = S.view === 1;
+  $('allStats').hidden = S.view !== 3;
+  $('stage').hidden = S.view === 3 || !S.res;
+  $('count').hidden = S.view !== 2;
+  $('tabs').hidden = S.view === 3 || !books.length;
+  $('bookEmpty').hidden = S.view === 3 || !!S.res;
+  $('bookEmpty').textContent = cur ? cur.status === 'error' ? `《${cur.name}》${cur.error || '校验失败，请重新导入'}` : `《${cur.name}》${cur.status === 'queued' ? '正在排队' : '正在校验'}，可选择其他已完成的剧本。` : books.length ? '剧本正在排队校验，完成后可逐本查看。' : '导入剧本后，在这里查看校验结果。';
 }
 
 function renderCount() {
   setSteps();
   $('ruleText').textContent = `${S.min}–${S.max}`;
   const el = $('count'); const a = S.res.analysis;
-  if (!S.res.format.ok || !a) { el.innerHTML = '<div class="lock">🔒 第 ② 步「字数统计」在格式校验通过后自动解锁</div>'; return; }
+  S.rows = null;
+  if (pendingBook(cur) || cur.status !== 'done') { el.innerHTML = '<div class="lock">正文正在修改或重新校验，旧字数已从全本统计中移除。</div>'; return; }
+  if (!S.res.format.ok || !a) { el.innerHTML = '<div class="lock">逐本审计的字数结果在格式校验通过后显示；可在下方修改正文后重新校验。</div>'; return; }
+  if (!a.episodes?.length) { el.innerHTML = '<div class="lock">未识别到正文集数，请检查正文标题与集号后重新校验。</div>'; return; }
   const unit = a.lang === 'en' ? '词' : '字';
   const eps = a.episodes.map((e) => { const n = countOf(e.counts, e.parts); return { ...e, n, v: verdict(n) }; });
   const bad = eps.filter((e) => e.v.kind !== 'ok');
   const avg = eps.length ? Math.round(eps.reduce((x, e) => x + e.n, 0) / eps.length) : 0;
   const rej = bad.length ? `<div class="reject"><h3>需打回 ${bad.length} 集</h3><div class="rows">${bad.map((e) => `<div class="rej" data-a="ep" data-ep="${e.no}" title="点击定位到文档"><span class="ep">第${e.no}集</span><span class="t">${esc(e.title || '')}</span><span class="w">${fmt(e.n)}</span><span class="tag">${e.v.label}${e.v.diff ? ' ' + fmt(e.v.diff) : ''}</span></div>`).join('')}</div></div>` : '<div class="pass-banner">✓ 全部集数字数合格，无需打回</div>';
-  el.innerHTML = `<div class="bar" style="position:static;margin:18px 0 0;padding:0 0 10px">
-      <div class="group"><span class="label">哪些算字数</span>
-        <label class="opt"><input type="checkbox" id="incScene" ${S.incScene ? 'checked' : ''}>场次头（如 11-1 夜 内 闻家老宅·西偏院书房）</label>
-        <label class="opt"><input type="checkbox" id="incCast" ${S.incCast ? 'checked' : ''}>人物行（如 人物：纪衡、温禾）</label></div>
-      <div class="group"><span class="label">合格区间</span><div class="range"><input id="min" type="number" min="0" value="${S.min}"><span>–</span><input id="max" type="number" min="1" value="${S.max}"><span class="unit">${unit}</span></div></div></div>
-    <article class="book ${bad.length ? 'has-bad' : ''}">
-      <header class="book-head"><div class="grow"><h2>${esc(S.name)}</h2><div class="meta">② 字数统计 · ${a.lang === 'en' ? '英文剧本 · 按单词计数' : '含标点与英文词 · 不含外译'}</div></div>${bad.length ? '<button class="btn sm" data-a="copy">复制打回清单</button>' : ''}</header>
+  el.innerHTML = `<article class="book ${bad.length ? 'has-bad' : ''}">
+      <header class="book-head"><div class="grow"><h2>${esc(S.name)}</h2><div class="meta">② 逐本审计 · ${a.lang === 'en' ? '英文剧本 · 按单词计数' : '含标点与英文词 · 不含外译'}</div></div>${bad.length ? '<button class="btn sm" data-a="copy">复制打回清单</button>' : ''}</header>
       <div class="chips"><span class="chip">共 <b>${eps.length}</b> 集</span><span class="chip ok">合格 <b>${eps.length - bad.length}</b></span>${bad.length ? `<span class="chip bad">打回 <b>${bad.length}</b></span>` : ''}<span class="chip">平均 <b>${fmt(avg)}</b> ${unit}</span>${(a.issues || []).map((i) => `<span class="chip warn">⚠ ${esc(i.text)}</span>`).join('')}</div>
       ${eps.length ? chartHTML(eps, unit) : ''}${rej}
       <details><summary>各集明细（${eps.length} 集）</summary><div class="tbl-wrap"><table class="tbl"><thead><tr><th>集</th><th>场数</th><th>字数</th><th>场次头(字)</th><th>人物行(字)</th><th>状态</th></tr></thead><tbody>
@@ -287,6 +397,7 @@ function manualCopy(text) {
 }
 
 function copyReject() {
+  if (!S.rows) return;
   const { bad, unit } = S.rows;
   const t = [`《${S.name}》字数要求 ${S.min}–${S.max}，需打回 ${bad.length} 集：`, ...bad.map((e) => `第${e.no}集：${e.v.kind === 'empty' ? '空集' : `${fmt(e.n)} ${unit}，${e.v.kind === 'short' ? '少' : '多'} ${fmt(e.v.diff)} ${unit}`}`)].join('\n');
   copyText(t).then((ok) => (ok ? toast('已复制打回清单') : manualCopy(t)));
@@ -294,12 +405,13 @@ function copyReject() {
 
 /* ---------- 事件 ---------- */
 function applyFix(id) {
+  if (!cur || pendingBook(cur)) return;
   const it = S.res.format.issues.find((x) => x.id === id); if (!it || !it.fix) return;
   const f = it.fix;
   if (f.op === 'set') S.paras[it.para] = f.text;
   else if (f.op === 'insertBefore') S.paras.splice(it.para, 0, f.text);
   else if (f.op === 'delete') S.paras.splice(it.para, 1);
-  recheck();
+  cur.dirty = true; cur.revision++; recheck();
 }
 // 把某一行放到文档视窗正中（用相对容器的真实位置，不用 offsetTop，避免偏到下一集）
 function centerRow(el, smooth = true) {
@@ -309,7 +421,7 @@ function centerRow(el, smooth = true) {
   wrap.scrollTo({ top: Math.max(0, target), behavior: smooth ? 'smooth' : 'auto' });
 }
 function gotoEpisode(no) {
-  if (!S.res) return;
+  if (!S.res || pendingBook(cur)) return;
   const blocks = S.res.format.blocks;
   const b = blocks.find((x) => x.kind === 'ep' && x.ep === no) || blocks.find((x) => x.kind === 'scene' && new RegExp(`^${no}[-－–—]`).test(x.text));
   if (!b) return toast(`文档里没有找到第${no}集的位置`);
@@ -334,38 +446,72 @@ document.addEventListener('click', (e) => {
   const btn = e.target.closest('[data-a]');
   if (btn) {
     const a = btn.dataset.a; const i = Number(btn.dataset.i);
-    if (a === 'autofix') autofix();
+    if (a === 'step') showStep(btn.dataset.step);
+    else if (a === 'summary-toggle') { const id = Number(btn.dataset.id); if (S.expandedSummary.has(id)) S.expandedSummary.delete(id); else S.expandedSummary.add(id); renderSummary(); }
+    else if (a === 'excel') downloadSummary();
+    else if (a === 'audit-book') { const b = books.find((x) => x.id === Number(btn.dataset.id)); if (b) { select(b); showStep(2); $('steps').scrollIntoView({ block: 'start', behavior: 'smooth' }); } }
+    else if (a === 'autofix') autofix();
     else if (a === 'recheck') recheck();
     else if (a === 'download') download();
     else if (a === 'goto') gotoPara(btn.dataset.p);
     else if (a === 'ep') gotoEpisode(Number(btn.dataset.ep));
     else if (a === 'fix') applyFix(Number(btn.dataset.id));
-    else if (a === 'cancel') { S.editing = -1; render(); }
-    else if (a === 'save') { S.paras[i] = $('ta').value.split('\n').map((x) => x.trim()).filter(Boolean).join('\n') || S.paras[i]; recheck(); }
-    else if (a === 'del') { S.paras.splice(i, 1); recheck(); }
-    else if (a === 'addafter') { S.paras.splice(i + 1, 0, '△'); S.editing = i + 1; recheck(); }
+    else if (a === 'cancel' && cur && !cur.rechecking) { if (cur.editDraft) cur.dirty = cur.editDraft.beforeDirty; cur.editDraft = null; loadCurrent(); render(); refreshBooks(); handoff.bookChanged(cur); }
+    else if (a === 'save' && cur && !cur.rechecking) { if (cur.editDraft) cur.editDraft.text = $('ta').value; recheck(); }
+    else if ((a === 'del' || a === 'addafter') && cur && !cur.rechecking) { if (a === 'del') S.paras.splice(i, 1); else S.paras.splice(i + 1, 0, '△'); cur.editDraft = null; cur.dirty = true; cur.revision++; recheck(); }
     else if (a === 'copy') copyReject();
     else if (a === 'tab') { const b = books.find((x) => x.id === Number(btn.dataset.id)); if (b && b !== cur) select(b); }
     else if (a === 'rm') {
       e.stopPropagation();
       const k = books.findIndex((x) => x.id === Number(btn.dataset.id)); if (k < 0) return;
       const gone = books.splice(k, 1)[0];
+      S.expandedSummary.delete(gone.id);
+      gone.revision++; gone.requestVersion++;
       gone.importRemoved = true; handoff.bookChanged(gone);
-      if (gone === cur) { cur = null; books.length ? select(books[Math.min(k, books.length - 1)]) : (S.res = null, $('stage').hidden = true, $('steps').hidden = true, renderTabs()); } else renderTabs();
+      if (gone === cur) { cur = null; if (books.length) select(books[Math.min(k, books.length - 1)]); else { loadCurrent(); render(); } }
+      refreshBooks();
     }
     return;
   }
   const row = e.target.closest('.paper .p[data-i]');
-  if (row && S.editing < 0 && !window.getSelection().toString()) {
-    S.editing = Number(row.dataset.i); render();
+  if (row && cur && !cur.rechecking && S.editing < 0 && !window.getSelection().toString()) {
+    S.editing = Number(row.dataset.i);
+    cur.editDraft = { para: S.editing, text: S.paras[S.editing], beforeDirty: cur.dirty };
+    render();
     const ta = $('ta'); if (ta) { ta.focus(); $('p' + S.editing).scrollIntoView({ block: 'nearest' }); }
   }
 });
 document.addEventListener('change', (e) => {
   if (e.target.id === 'onlyBad') { S.onlyBad = e.target.checked; render(); }
   if (e.target.id === 'showTr') { S.showTr = e.target.checked; render(); }
-  if (e.target.id === 'incScene' || e.target.id === 'incCast') { S[e.target.id] = e.target.checked; render(); }
-  if (e.target.id === 'min' || e.target.id === 'max') { S.min = Number($('min').value) || 0; S.max = Number($('max').value) || 1; renderCount(); }
+  if (e.target.id === 'incScene' || e.target.id === 'incCast') { S[e.target.id] = e.target.checked; render(); refreshBooks(); }
+  if (e.target.id === 'min' || e.target.id === 'max') {
+    try {
+      const options = AuditSummary.normalizeOptions({ ...auditOptions(), min: $('min').value, max: $('max').value });
+      S.min = options.min; S.max = options.max;
+    } catch (error) { toast(error.message); }
+    $('min').value = S.min; $('max').value = S.max;
+    $('ruleText').textContent = `${S.min}–${S.max}`;
+    if (S.res) renderCount(); refreshBooks();
+  }
+});
+
+document.addEventListener('input', (e) => {
+  if (e.target.id !== 'ta' || !cur?.editDraft || cur.rechecking) return;
+  cur.editDraft.text = e.target.value;
+  cur.dirty = cur.editDraft.beforeDirty || e.target.value !== cur.paras[cur.editDraft.para];
+  cur.revision++;
+  // 输入时保留 textarea 与光标，只更新字数、按钮和其他汇总区域。
+  $('statusbar').querySelector('[data-a="download"]').disabled = cur.dirty || !cur.res?.format.ok;
+  if (S.res) renderCount();
+  refreshBooks(); handoff.bookChanged(cur);
+});
+
+$('steps').addEventListener('keydown', (e) => {
+  if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
+  e.preventDefault();
+  const next = e.key === 'Home' ? 1 : e.key === 'End' ? 3 : ((S.view - 1 + (e.key === 'ArrowRight' ? 1 : -1) + 3) % 3) + 1;
+  showStep(next); $('st' + next).focus();
 });
 
 const drop = $('drop'); const input = $('file');
@@ -483,3 +629,6 @@ document.addEventListener('selectionchange', () => {
   }, 180);
 });
 document.addEventListener('click', (e) => { if (e.target.closest('[data-a="mcclose"]')) { const m = $('manualcopy'); if (m) m.hidden = true; } const b = e.target.closest('[data-a="selclear"]'); if (b) { window.getSelection().removeAllRanges(); hideSel(); } });
+
+refreshBooks();
+render();

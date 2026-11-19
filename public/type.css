@@ -1,9 +1,10 @@
 main { max-width: 1280px; }
 .steps { list-style: none; display: flex; gap: 10px; align-items: center; margin: 18px 0 0; padding: 0; font-weight: 700; }
-.steps li { display: flex; align-items: center; gap: 8px; padding: 6px 14px; border-radius: 999px; border: 1px solid var(--line); background: var(--paper); color: var(--muted); }
+.steps button { display: flex; align-items: center; gap: 8px; padding: 10px 18px; border-radius: 999px; border: 1px solid var(--line); background: var(--paper); color: var(--muted); font: inherit; cursor: pointer; }
 .steps li.arrow { border: 0; background: none; padding: 0; }
-.steps li i { font: 800 13px/1 var(--serif); width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; background: var(--line); color: var(--ink); font-style: normal; }
-.steps li.cur { color: var(--ink); border-color: var(--ink); } .steps li.cur i { background: var(--ink); color: var(--paper); }
+.steps button i { font: 800 13px/1 var(--serif); width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; background: var(--line); color: var(--ink); font-style: normal; }
+.steps button.cur { color: var(--ink); border-color: var(--ink); } .steps button.cur i { background: var(--ink); color: var(--paper); }
+.steps button:focus-visible, .tab-select:focus-visible, .book-link:focus-visible { outline: 3px solid var(--red); outline-offset: 3px; }
 .steps li.done { color: var(--ok); border-color: #9fd3c3; background: var(--ok-bg); } .steps li.done i { background: var(--ok); color: #fff; }
 .steps li.fail { color: var(--red-deep); border-color: var(--red-line); background: var(--red-bg); } .steps li.fail i { background: var(--red); color: #fff; }
 .gate-go { margin-left: 6px; }
@@ -14,7 +15,7 @@ main { max-width: 1280px; }
 .statusbar.pass { border-color: #9fd3c3; background: var(--ok-bg); }
 .statusbar .t { font-weight: 800; font-size: 16px; margin-right: auto; }
 .statusbar .t small { font-weight: 500; color: var(--muted); margin-left: 8px; }
-.cols { display: grid; grid-template-columns: 22px 300px minmax(0, 1fr) 250px; gap: 12px; align-items: start; }
+.cols { display: grid; grid-template-columns: 22px 260px minmax(0, 1fr); gap: 12px; align-items: start; }
 .side { position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow: auto; background: var(--paper); border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
 .side h3 { margin: 4px 0 8px; font-size: 14px; }
 .issue { display: block; width: 100%; text-align: left; border: 1px solid var(--line); border-radius: 8px; background: transparent; padding: 7px 9px; margin-bottom: 6px; cursor: pointer; font-size: 13px; line-height: 1.45; }
@@ -59,8 +60,9 @@ main { max-width: 1280px; }
 .minimap .tip { position: absolute; left: 26px; transform: translateY(-50%); background: var(--ink); color: var(--paper); font: 11px var(--sans); padding: 1px 6px; border-radius: 4px; white-space: nowrap; pointer-events: none; display: none; z-index: 3; }
 .minimap:hover .tip { display: block; }
 /* 多本标签 */
-.tabs { display: flex; gap: 8px; flex-wrap: wrap; margin: 16px 0 0; }
-.tab { display: flex; align-items: center; gap: 8px; max-width: 260px; padding: 6px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--paper); cursor: pointer; font-size: 13px; }
+.tabs { display: flex; gap: 8px; flex-wrap: wrap; margin: 16px 0 0; max-height: 160px; overflow: auto; padding: 3px; }
+.tab { display: flex; align-items: center; gap: 4px; max-width: 290px; padding: 0 8px 0 0; border-radius: 10px; border: 1px solid var(--line); background: var(--paper); font-size: 13px; }
+.tab-select { display: flex; align-items: center; gap: 8px; min-width: 0; border: 0; background: none; color: inherit; font: inherit; padding: 8px 6px 8px 10px; cursor: pointer; }
 .tab .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 150px; }
 .tab.cur { border-color: var(--ink); box-shadow: var(--shadow); font-weight: 700; }
 .tab .st { flex: none; font-size: 11px; font-weight: 800; padding: 0 6px; border-radius: 4px; background: var(--line); color: var(--ink); }
@@ -119,3 +121,58 @@ s.tr, .paper s.tr { color: #9a9a9a; text-decoration: line-through; text-decorati
 .workbench-import li > span { min-width: 0; overflow-wrap: anywhere; }
 .workbench-import li small { flex: 0 1 50%; text-align: right; color: var(--muted); }
 .workbench-import li.bad small { color: var(--red); }
+
+/* 三个视图共用导入、口径与数据；隐藏面板不参与布局。 */
+[hidden] { display: none !important; }
+.guide-card { margin: 14px 0 0; background: var(--paper); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); }
+.guide-card > summary { padding: 12px 18px; font-weight: 800; font-size: 15px; color: var(--ink); display: flex; align-items: baseline; gap: 10px; list-style: none; }
+.guide-card > summary::-webkit-details-marker { display: none; }
+.guide-card > summary::before { content: "▸"; color: var(--muted); }
+.guide-card[open] > summary::before { transform: rotate(90deg); }
+.guide-sub { color: var(--muted); font-weight: 500; font-size: 12px; }
+.guide-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; padding: 0 20px 16px; font-size: 13px; line-height: 1.7; }
+.guide-grid h3 { margin: 0 0 6px; font-size: 14px; }
+.guide-grid ol, .guide-grid ul { margin: 0; padding-left: 18px; }
+.guide-grid li { margin-bottom: 5px; }
+.guide-grid p { margin: 0 0 8px; }
+.guide-grid .g-note { margin: 10px 0 0; padding: 10px 12px; background: var(--ok-bg); border-radius: 8px; color: var(--ok); }
+.audit-rules { margin-top: 18px; padding: 14px 18px; border: 1px solid var(--line); border-radius: 12px; background: var(--paper); display: flex; flex-wrap: wrap; gap: 14px 24px; align-items: center; justify-content: space-between; font-size: 13px; }
+.audit-rules > div { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.audit-rules .range { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.audit-rules .range input { width: 78px; }
+.format-overview, .all-stats { margin-top: 18px; border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; background: var(--paper); }
+.overview-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.overview-head h2 { margin: 0; font: 800 22px/1.4 var(--serif); }
+.overview-head p { margin: 5px 0 0; font-size: 13px; color: var(--muted); }
+.overview-note { font-size: 13px; line-height: 1.7; color: var(--muted); margin: 10px 0 0; }
+.summary-table { margin-top: 16px; max-height: min(70vh, 720px); overflow: auto; }
+.summary-table .tbl { min-width: 650px; width: 100%; }
+.summary-table thead th { position: sticky; top: 0; z-index: 2; background: var(--paper); box-shadow: 0 1px 0 var(--line); }
+.summary-table th:first-child, .summary-table td:first-child { width: 48%; text-align: left; }
+.summary-table td { vertical-align: top; padding-top: 14px; padding-bottom: 14px; }
+.book-link { padding: 0; background: none; border: 0; color: var(--ink); font: inherit; font-weight: 700; text-align: left; cursor: pointer; overflow-wrap: anywhere; }
+.book-link:hover { color: var(--red); text-decoration: underline; }
+.summary-status, .summary-note { display: block; margin-top: 5px; color: var(--muted); font-size: 12px; font-weight: 400; line-height: 1.6; }
+.summary-status.ok { color: var(--ok); }
+.summary-line { min-height: 30px; line-height: 26px; white-space: nowrap; }
+.summary-toggle { display: block; border: 0; background: transparent; color: var(--red); font: inherit; font-size: 12px; padding: 5px 0; margin-top: 3px; cursor: pointer; white-space: nowrap; }
+.summary-toggle:hover { text-decoration: underline; }
+.summary-toggle:focus-visible { outline: 2px solid var(--red); outline-offset: 2px; }
+.summary-empty { margin: 28px 0; text-align: center; color: var(--muted); }
+.paper.is-checking { opacity: .65; pointer-events: none; }
+#count { margin: 12px 0 18px; }
+#bookEmpty { margin: 32px 0; }
+@media (max-width: 720px) {
+  .guide-grid { grid-template-columns: 1fr; gap: 16px; padding: 0 16px 14px; }
+  .guide-card > summary { flex-wrap: wrap; gap: 6px; }
+  .guide-sub { flex-basis: 100%; padding-left: 16px; }
+  .steps { gap: 6px; }
+  .steps button { padding: 9px 10px; gap: 5px; font-size: 13px; }
+  .steps button i { width: 19px; height: 19px; }
+  .format-overview, .all-stats { padding: 14px; }
+  .audit-rules { padding: 12px; gap: 12px; }
+  .audit-rules .opt { margin-left: 0; }
+  .overview-head .btn { min-height: 40px; }
+  .tabs { max-height: 180px; }
+  .tab { max-width: 100%; }
+}
