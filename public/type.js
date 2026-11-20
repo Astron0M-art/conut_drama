@@ -8,6 +8,8 @@ const CONCURRENCY = 2;
 const EXTS = ['.docx', '.txt', '.md'];
 // S 是「当前选中那一本」的视图；books 保存每本的状态
 const S = { marks: {}, showTr: true, name: '', paras: [], res: null, editing: -1, onlyBad: false, min: 550, max: 1000, incScene: false, incCast: false, view: 1, exporting: false, expandedSummary: new Set() };
+let batchFixing = false;
+let batchExportBooks = null;
 // 字数 = 台词与动作 +（可选）场次头 +（可选）人物行；默认两者都不计
 const countOf = (c, p) => c.pure + (S.incScene ? p.scene : 0) + (S.incCast ? p.cast : 0);
 const modeText = () => (S.incScene || S.incCast ? `计入${[S.incScene && '场次头', S.incCast && '人物行'].filter(Boolean).join('、')}` : '不计场次头、人物行');
@@ -94,7 +96,14 @@ function renderFormatOverview() {
   if (S.view !== 1) return;
   const data = summaryData();
   const passed = books.filter((b) => !pendingBook(b) && b.status === 'done' && b.res?.format.ok).length;
-  $('formatOverview').innerHTML = `<div class="overview-head"><div><h2>格式校验</h2><p>已导入 ${books.length} / ${MAX_BOOKS} 本 · 格式通过 ${passed} 本 · ${data.totals.pending} 本等待或处理中</p></div><button class="btn ghost" data-a="step" data-step="3" ${books.length ? '' : 'disabled'}>查看全本统计 →</button></div>${books.length ? '<p class="overview-note">上方每本按队列自动校验。选择下方剧本可查看问题和修改；“格式通过”只表示结构通过，字数是否合格请进入逐本审计。</p>' : '<p class="overview-note">拖入剧本或从直出平台导入后自动开始，每次并行处理 2 本。</p>'}`;
+  const angleBooks = books.filter((b) => !pendingBook(b) && b.status === 'done' && b.res?.format?.issues?.some((x) => x.code === 'model-output-angle-tag'));
+  const allReady = books.length > 0 && books.every((b) => !pendingBook(b) && b.status === 'done');
+  const batchAction = batchExportBooks
+    ? `<button class="btn batch-primary" data-a="batch-export">一次性导出修复后 ZIP（${batchExportBooks.length} 本）</button>`
+    : angleBooks.length && allReady
+      ? `<button class="btn batch-primary" data-a="batch-fix" ${batchFixing ? 'disabled' : ''}>${batchFixing ? '正在批量修复…' : `一键修复全部尖括号（${angleBooks.length} 本有问题）`}</button>`
+      : '';
+  $('formatOverview').innerHTML = `<div class="overview-head"><div><h2>格式校验</h2><p>已导入 ${books.length} / ${MAX_BOOKS} 本 · 格式通过 ${passed} 本 · ${data.totals.pending} 本等待或处理中</p></div><div class="overview-actions">${batchAction}<button class="btn ghost" data-a="step" data-step="3" ${books.length ? '' : 'disabled'}>查看全本统计 →</button></div></div>${batchExportBooks ? '<p class="overview-note">已批量删除正文中的非法尖括号内容。压缩包包含本次导入的全部剧本，点击上方按钮一次性下载。</p>' : books.length ? '<p class="overview-note">上方每本按队列自动校验。选择下方剧本可查看问题和修改；“格式通过”只表示结构通过，字数是否合格请进入逐本审计。</p>' : '<p class="overview-note">拖入剧本或从直出平台导入后自动开始，每次并行处理 2 本。</p>'}`;
 }
 
 function renderSummary() {
@@ -128,6 +137,49 @@ async function downloadSummary() {
     toast(`已导出 ${payload.books.length} 本剧本的统计`);
   } catch (e) { toast(e.message); }
   finally { S.exporting = false; renderSummary(); }
+}
+
+async function batchFixAngleTags() {
+  if (batchFixing || !books.length || books.some((b) => pendingBook(b) || b.status !== 'done')) return;
+  const angleBooks = books.filter((b) => b.res?.format?.issues?.some((x) => x.code === 'model-output-angle-tag'));
+  if (!angleBooks.length) return;
+  if (!window.confirm(`将一次性检查并修复全部 ${books.length} 本剧本中正文里的非法尖括号内容。修复会删除从 <note> 到 </note> 的整个 few-shot 说明块（包括其中的集号和文字），完成后可一次性导出全部剧本 ZIP。是否继续？`)) return;
+  batchFixing = true; batchExportBooks = null; renderFormatOverview();
+  try {
+    const payload = { books: books.map((b) => ({ id: b.id, name: b.name, paragraphs: b.paras })) };
+    const r = await postJSON('/api/fix-batch', payload);
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || '批量修复失败');
+    let removed = 0; let fixedBooks = 0;
+    for (const item of d.books || []) {
+      const b = books.find((x) => x.id === item.id);
+      if (!b) continue;
+      b.paras = item.paragraphs || b.paras; b.res = item; b.status = 'done'; b.dirty = false; b.error = '';
+      b.revision++; fixedBooks += Number(item.angleRemoved || 0) > 0 ? 1 : 0;
+      removed += Number(item.angleRemoved || 0);
+      handoff.bookChanged(b);
+    }
+    const invalid = (d.books || []).filter((item) => !item.format?.ok);
+    batchExportBooks = invalid.length ? null : (d.books || []).map((item) => ({ id: item.id, name: item.name, paragraphs: item.paragraphs }));
+    if (cur) { loadCurrent(); render(); }
+    refreshBooks();
+    toast(`已处理 ${d.total || 0} 本，其中 ${fixedBooks} 本已删除非法尖括号内容（共 ${removed} 处），优化结束${invalid.length ? `；仍有 ${invalid.length} 本存在其他格式错误，请逐本处理` : '；请一次性导出修复后的 ZIP'}`);
+  } catch (e) { toast(e.message); }
+  finally { batchFixing = false; renderFormatOverview(); }
+}
+
+async function downloadBatchFixed() {
+  if (!batchExportBooks?.length) return;
+  if (!window.confirm(`将一次性导出全部 ${batchExportBooks.length} 本已修复剧本，压缩包内每本对应一个 Word 文件。是否下载？`)) return;
+  try {
+    const r = await postJSON('/api/export-batch', { books: batchExportBooks });
+    if (!r.ok) {
+      const d = await r.json().catch(() => ({}));
+      throw new Error(d.error || '批量导出失败');
+    }
+    saveBlob(await r.blob(), '修复后剧本.zip');
+    toast(`已导出 ${batchExportBooks.length} 本修复后的剧本`);
+  } catch (e) { toast(e.message); }
 }
 
 function saveBlob(blob, filename) {
@@ -169,6 +221,8 @@ async function validateOne(b) {
 }
 
 function addFiles(list, imported = false) {
+  if (batchFixing) { toast('批量修复进行中，请等待任务结束后再导入剧本'); return []; }
+  if (list?.length) batchExportBooks = null;
   let skipped = 0; let over = 0; let dup = 0; let oversize = 0; const added = [];
   for (const f of [...list]) {
     const ext = (f.name.match(/\.[^.]+$/) || [''])[0].toLowerCase();
@@ -251,7 +305,7 @@ function paraHTML(b) {
   else if (['stage', 'ep'].includes(b.kind)) inner = `<b>${esc(b.text)}</b>`;
   else inner = esc(b.text);
   inner = markTranslations(b, inner);
-  const why = issues.map((x) => `<span class="why ${x.level === 'warn' ? 'w' : ''}">${x.level === 'warn' ? '⚠' : '✗'} ${esc(x.message)}${x.fixable ? `<button data-a="fix" data-id="${x.id}">${x.fix.op === 'delete' ? '删除此行' : x.fix.op === 'insertBefore' ? `补上「${esc(x.fix.text)}」` : '一键改为：' + esc(x.fix.text.slice(0, 40)).replace(/\n/g, ' ')}</button>` : ''}</span>`).join('');
+  const why = issues.map((x) => `<span class="why ${x.level === 'warn' ? 'w' : ''}">${x.level === 'warn' ? '⚠' : '✗'} ${esc(x.message)}${x.fixable ? `<button data-a="fix" data-id="${x.id}">${x.fix.op === 'delete' ? '删除此行' : x.fix.op === 'insertBefore' ? `补上「${esc(x.fix.text)}」` : x.fix.op === 'removeAngle' ? '删除尖括号及其中内容' : '一键改为：' + esc(x.fix.text.slice(0, 40)).replace(/\n/g, ' ')}</button>` : ''}</span>`).join('');
   return `<div class="${cls}" id="p${b.para}" data-i="${b.para}" title="${/\bnc\b/.test(cls) ? '这一行不计字数（可在统计区「哪些算字数」勾选改变）；' : ''}点击修改本行；框选文字可统计字数"><span class="gutter">${b.para + 1}</span>${inner}${why}</div>`;
 }
 
@@ -411,6 +465,21 @@ function applyFix(id) {
   if (f.op === 'set') S.paras[it.para] = f.text;
   else if (f.op === 'insertBefore') S.paras.splice(it.para, 0, f.text);
   else if (f.op === 'delete') S.paras.splice(it.para, 1);
+  else if (f.op === 'removeAngle') {
+    const startPara = Number.isInteger(f.startPara) ? f.startPara : it.para;
+    const endPara = Number.isInteger(f.endPara) ? f.endPara : startPara;
+    const start = Math.max(0, f.startIndex || 0);
+    const end = Math.max(start, f.endIndex || start);
+    if (startPara === endPara) {
+      const text = String(S.paras[startPara] || '');
+      S.paras[startPara] = text.slice(0, start) + text.slice(end);
+      if (!S.paras[startPara]) S.paras.splice(startPara, 1);
+    } else {
+      const prefix = String(S.paras[startPara] || '').slice(0, start);
+      const suffix = String(S.paras[endPara] || '').slice(end);
+      S.paras.splice(startPara, endPara - startPara + 1, ...[prefix, suffix].filter(Boolean));
+    }
+  }
   cur.dirty = true; cur.revision++; recheck();
 }
 // 把某一行放到文档视窗正中（用相对容器的真实位置，不用 offsetTop，避免偏到下一集）
@@ -449,6 +518,8 @@ document.addEventListener('click', (e) => {
     if (a === 'step') showStep(btn.dataset.step);
     else if (a === 'summary-toggle') { const id = Number(btn.dataset.id); if (S.expandedSummary.has(id)) S.expandedSummary.delete(id); else S.expandedSummary.add(id); renderSummary(); }
     else if (a === 'excel') downloadSummary();
+    else if (a === 'batch-fix') batchFixAngleTags();
+    else if (a === 'batch-export') downloadBatchFixed();
     else if (a === 'audit-book') { const b = books.find((x) => x.id === Number(btn.dataset.id)); if (b) { select(b); showStep(2); $('steps').scrollIntoView({ block: 'start', behavior: 'smooth' }); } }
     else if (a === 'autofix') autofix();
     else if (a === 'recheck') recheck();
@@ -463,8 +534,10 @@ document.addEventListener('click', (e) => {
     else if (a === 'tab') { const b = books.find((x) => x.id === Number(btn.dataset.id)); if (b && b !== cur) select(b); }
     else if (a === 'rm') {
       e.stopPropagation();
+      if (batchFixing) return toast('批量修复进行中，请等待任务结束后再移除剧本');
       const k = books.findIndex((x) => x.id === Number(btn.dataset.id)); if (k < 0) return;
       const gone = books.splice(k, 1)[0];
+      batchExportBooks = null;
       S.expandedSummary.delete(gone.id);
       gone.revision++; gone.requestVersion++;
       gone.importRemoved = true; handoff.bookChanged(gone);

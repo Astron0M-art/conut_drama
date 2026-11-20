@@ -73,6 +73,40 @@ test('孤立的 < 字符给出可定位警告，但不阻止统计；闭合块�
   assert.strictEqual(r.ok, true);
 });
 
+test('尖括号标签支持一键删除：包含内容、闭合标签和跨段落内容都删除', () => {
+  const p = ref();
+  const body = idx(p, /^正文内容$/);
+  p.splice(body + 4, 0,
+    '甲：保留<note>模型备注</note>文本',
+    '甲：保留</note>文本',
+    '甲：保留<note>文本',
+    '甲：跨段落<提示>',
+    '模型备注',
+    '第99集（few-shot 内部集号，不得进入正文）',
+    '</提示>文本',
+    '甲：保留<>模型备注</>文本');
+  const fixed = autoFix(p);
+  assert.equal(fixed.report.ok, true);
+  assert.equal(fixed.report.issues.some((item) => item.code === 'model-output-angle-tag'), false);
+  assert.ok(fixed.paras.includes('甲：保留文本'));
+  assert.ok(fixed.paras.includes('甲：跨段落'));
+  assert.ok(fixed.paras.includes('文本'));
+  assert.equal(fixed.paras.some((line) => line.includes('第99集')), false);
+  assert.equal(fixed.paras.some((line) => /<\/?(?:note|提示)>|<>|<\/>/.test(line)), false);
+});
+
+test('转义尖括号标签（\\<note>...\\</note>）修复时连反斜杠一起删除', () => {
+  const p = ref();
+  const body = idx(p, /^正文内容$/);
+  p.splice(body + 4, 0, '△前文 \\<note>few-shot 内部内容\\</note> 后文');
+  const issue = check(p).issues.find((item) => item.code === 'model-output-angle-tag');
+  assert.ok(issue && issue.fixable);
+  const fixed = autoFix(p);
+  assert.ok(fixed.report.ok);
+  assert.ok(fixed.paras.every((line) => !/[\\<>]/.test(line)));
+  assert.ok(fixed.paras.some((line) => /△前文\s+后文/.test(line)));
+});
+
 test('缺集：第1集后直接第3集', () => {
   const p = ref(); const i = idx(p, /^第2集$/);
   const end = idx(p, /^第3集$/);

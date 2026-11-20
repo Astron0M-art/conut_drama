@@ -142,6 +142,10 @@ s.tr, .paper s.tr { color: #9a9a9a; text-decoration: line-through; text-decorati
 .audit-rules .range input { width: 78px; }
 .format-overview, .all-stats { margin-top: 18px; border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; background: var(--paper); }
 .overview-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.overview-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.overview-actions .batch-primary { background: var(--red); border-color: var(--red-deep); color: #fff; padding: 9px 16px; font-weight: 800; box-shadow: 0 3px 0 var(--red-deep), 0 8px 18px rgba(212,35,31,.18); }
+.overview-actions .batch-primary:hover { filter: brightness(1.08); transform: translateY(-1px); }
+.overview-actions .batch-primary:disabled { opacity: .65; transform: none; box-shadow: none; }
 .overview-head h2 { margin: 0; font: 800 22px/1.4 var(--serif); }
 .overview-head p { margin: 5px 0 0; font-size: 13px; color: var(--muted); }
 .overview-note { font-size: 13px; line-height: 1.7; color: var(--muted); margin: 10px 0 0; }

@@ -11,10 +11,13 @@ const fmt = require('./lib/format');
 const { createTranslationManager } = require('./lib/translate');
 const { summarizeBooks } = require('./public/audit-summary');
 const { exportAuditXlsx } = require('./lib/audit-export');
+const { writeAll: writeZip } = require('./lib/format/zip');
 
 const PORT = process.env.PORT === '0' ? 0 : Number(process.env.PORT) || 3000; // PORT=0：随机空闲端口（测试用）
 const HOST = process.env.HOST || '127.0.0.1';
 const MAX_FILE = 30 * 1024 * 1024; // 单文件上限
+const MAX_BATCH_BOOKS = 100;
+const MAX_BATCH_BODY = 128 * 1024 * 1024; // 100 本段落数组的批量修复/导出请求
 const MAX_QUEUE = 64; // 排队中的解析任务上限，超出返回 503
 const MAX_PER_IP = 24; // 单 IP 同时在途请求
 const TRUST_PROXY = process.env.TRUST_PROXY === '1'; // 在 nginx 后面时设为 1，按 X-Forwarded-For 区分访客
@@ -359,6 +362,71 @@ async function handleAuditExport(req, res) {
   }
 }
 
+function readBatchBooks(body) {
+  if (!body || typeof body !== 'object' || !Array.isArray(body.books) || !body.books.length) {
+    throw Object.assign(new Error('请先导入需要处理的剧本'), { status: 400 });
+  }
+  if (body.books.length > MAX_BATCH_BOOKS) {
+    throw Object.assign(new Error(`每批最多处理${MAX_BATCH_BOOKS}本剧本`), { status: 400 });
+  }
+  return body.books.map((book, index) => {
+    if (!book || typeof book !== 'object' || !Array.isArray(book.paragraphs) || book.paragraphs.some((x) => typeof x !== 'string') || book.paragraphs.length > 200000) {
+      throw Object.assign(new Error(`第${index + 1}本缺少有效 paragraphs（字符串数组）`), { status: 400 });
+    }
+    const name = String(book.name || `剧本${index + 1}`).slice(0, 200);
+    return { id: book.id == null ? index + 1 : book.id, name, paragraphs: book.paragraphs };
+  });
+}
+
+async function readBatchBody(req) {
+  let raw;
+  try { raw = await readBody(req, MAX_BATCH_BODY, '批量请求超过 128MB'); } catch (e) { throw e; }
+  try { return JSON.parse(raw.toString() || 'null'); } catch { throw Object.assign(new Error('批量请求格式错误'), { status: 400 }); }
+}
+
+async function handleBatchFix(req, res) {
+  try {
+    const books = readBatchBooks(await readBatchBody(req));
+    const result = books.map((book) => {
+      const before = fmt.check(book.paragraphs);
+      const fixed = fmt.autoFixAngleTags(book.paragraphs);
+      const validated = fmt.validateParagraphs(fixed.paras, book.name);
+      return { id: book.id, name: book.name, paragraphs: validated.paragraphs, applied: fixed.applied, angleRemoved: before.issues.filter((x) => x.code === 'model-output-angle-tag').length, format: validated.format, analysis: validated.analysis, marks: validated.marks };
+    });
+    return send(res, 200, { books: result, total: result.length, changed: result.filter((x) => x.applied > 0).length, applied: result.reduce((n, x) => n + x.applied, 0) }, undefined, { 'Cache-Control': 'no-store' });
+  } catch (e) {
+    return send(res, e.status || 400, { error: e.message || '批量修复失败' });
+  }
+}
+
+function safeZipName(name, used) {
+  const base = String(name || '剧本').replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_').trim() || '剧本';
+  let candidate = `${base}_标准格式.docx`;
+  let n = 2;
+  while (used.has(candidate)) candidate = `${base}_${n++}_标准格式.docx`;
+  used.add(candidate);
+  return candidate;
+}
+
+async function handleBatchExport(req, res) {
+  try {
+    const books = readBatchBooks(await readBatchBody(req));
+    const invalid = [];
+    const files = new Map(); const used = new Set();
+    for (const book of books) {
+      const report = fmt.check(book.paragraphs);
+      if (!report.ok) { invalid.push({ id: book.id, name: book.name, errors: report.errors }); continue; }
+      files.set(safeZipName(book.name, used), fmt.exportDocx(book.paragraphs));
+    }
+    if (invalid.length) return send(res, 422, { error: `仍有 ${invalid.length} 本格式未通过，未生成压缩包`, invalid });
+    const output = writeZip(files);
+    const filename = `修复后剧本_${new Date().toISOString().slice(0, 10)}.zip`;
+    return send(res, 200, output, 'application/zip', { 'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`, 'Cache-Control': 'no-store' });
+  } catch (e) {
+    return send(res, e.status || 400, { error: e.message || '批量导出失败' });
+  }
+}
+
 function handle(req, res) {
   const url = req.url.split('?')[0];
   const get = req.method === 'GET';
@@ -376,6 +444,8 @@ function handle(req, res) {
   }
 
   if (req.method === 'POST' && url === '/api/audit/export') return handleAuditExport(req, res);
+  if (req.method === 'POST' && url === '/api/fix-batch') return handleBatchFix(req, res);
+  if (req.method === 'POST' && url === '/api/export-batch') return handleBatchExport(req, res);
 
   if (req.method === 'POST' && url === '/api/translate/start') return handleTranslationStart(req, res);
   if (get && url === '/api/translate/models') return handleTranslationModels(req, res);
