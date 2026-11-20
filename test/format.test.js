@@ -61,6 +61,18 @@ test('任意成对尖括号内容都定位，包括中文标签和空标签 <> <
   }
 });
 
+test('孤立的 < 字符给出可定位警告，但不阻止统计；闭合块仍是错误', () => {
+  const p = ref();
+  const body = idx(p, /^正文内容$/);
+  p.splice(body + 4, 0, '甲：a < b，这只是一个需要确认的尖括号。');
+  const r = check(p);
+  const issue = r.issues.find((item) => item.code === 'angle-bracket-character');
+  assert.ok(issue);
+  assert.strictEqual(issue.level, 'warn');
+  assert.strictEqual(issue.para, body + 4);
+  assert.strictEqual(r.ok, true);
+});
+
 test('缺集：第1集后直接第3集', () => {
   const p = ref(); const i = idx(p, /^第2集$/);
   const end = idx(p, /^第3集$/);
