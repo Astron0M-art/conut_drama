@@ -24,6 +24,43 @@ test('格式不通过时不统计字数', () => {
   assert.strictEqual(r.analysis, undefined);
 });
 
+test('正文中的成对尖括号标签按疑似模型输出拦截，标签前的说明文字不受影响', () => {
+  const p = ref();
+  const body = idx(p, /^正文内容$/);
+  p.splice(body + 4, 0, '<note>这是模型内部备注，不应进入剧本正文。</note>');
+  const r = check(p);
+  const issue = r.issues.find((item) => item.code === 'model-output-angle-tag');
+  assert.ok(issue);
+  assert.strictEqual(issue.level, 'error');
+  assert.strictEqual(issue.para, body + 4);
+  assert.match(issue.message, /<note>/);
+  assert.strictEqual(r.ok, false);
+});
+
+test('跨段落闭合的尖括号标签也能拦截；不完整标签不误报', () => {
+  const p = ref();
+  const body = idx(p, /^正文内容$/);
+  p.splice(body + 4, 0, '<think>', '中间内容', '</think>');
+  let r = check(p);
+  assert.ok(r.issues.some((item) => item.code === 'model-output-angle-tag'));
+  const q = ref();
+  const qBody = idx(q, /^正文内容$/);
+  q.splice(qBody + 4, 0, '数学比较：a < b，暂不构成闭合标签');
+  r = check(q);
+  assert.doesNotMatch(r.issues.map((item) => item.code).join(','), /model-output-angle-tag/);
+});
+
+test('任意成对尖括号内容都定位，包括中文标签和空标签 <> </>', () => {
+  for (const pair of [['<提示>模型内容</提示>', '<提示>'], ['<>模型内容</>', '<>']]) {
+    const p = ref();
+    const body = idx(p, /^正文内容$/);
+    p.splice(body + 4, 0, pair[0]);
+    const issue = check(p).issues.find((item) => item.code === 'model-output-angle-tag');
+    assert.ok(issue, pair[0]);
+    assert.match(issue.message, new RegExp(pair[1].replace(/[<>]/g, '\\$&')));
+  }
+});
+
 test('缺集：第1集后直接第3集', () => {
   const p = ref(); const i = idx(p, /^第2集$/);
   const end = idx(p, /^第3集$/);
