@@ -20,8 +20,8 @@ function payload(count) {
   return { name: '并发测试', paragraphs, episodes, targetLanguage: '英语', modelKey: 'deepseek' };
 }
 
-test('批量翻译支持 100 集，最多 20 集并发，其余排队且单集失败不终止整批', async () => {
-  assert.equal(MAX_EPISODES, 100);
+test('批量翻译支持 300 集，最多 20 集并发，其余排队且单集失败不终止整批', async () => {
+  assert.equal(MAX_EPISODES, 300);
   assert.equal(MAX_CONCURRENT_EPISODES, 20);
   let active = 0;
   let maxActive = 0;
@@ -39,7 +39,7 @@ test('批量翻译支持 100 集，最多 20 集并发，其余排队且单集�
       return `译文 ${episode.episode}`;
     },
   });
-  const started = manager.start(payload(100));
+  const started = manager.start(payload(300));
   const events = [];
   manager.subscribe(started.jobId, (event) => { if (event) events.push(event); });
   let job;
@@ -48,9 +48,9 @@ test('批量翻译支持 100 集，最多 20 集并发，其余排队且单集�
     job = manager.get(started.jobId);
     if (job?.finishedAt) break;
   }
-  assert.ok(job?.finishedAt, '100 集任务应在测试窗口内结束');
+  assert.ok(job?.finishedAt, '300 集任务应在测试窗口内结束');
   assert.equal(maxActive, 20, '并发窗口应填满到 20 集');
-  assert.equal(job.completed, 99);
+  assert.equal(job.completed, 299);
   assert.equal(job.failed, 1);
   assert.equal(job.queued, 0);
   assert.equal(job.running, 0);
@@ -61,7 +61,13 @@ test('批量翻译支持 100 集，最多 20 集并发，其余排队且单集�
   assert.ok(failedIndex >= 0);
   assert.ok(lastCompletedIndex > failedIndex, '单集失败后仍应继续完成其它集');
   assert.ok(jobFailedIndex > lastCompletedIndex, 'job_failed 必须在所有集结束后发出');
-  assert.equal(events.filter((event) => event.type === 'episode_started').length, 100);
-  assert.equal(events.filter((event) => event.type === 'episode_completed').length, 99);
+  assert.equal(events.filter((event) => event.type === 'episode_started').length, 300);
+  assert.equal(events.filter((event) => event.type === 'episode_completed').length, 299);
   assert.equal(events.filter((event) => event.type === 'episode_failed').length, 1);
+});
+
+test('翻译接口拒绝第301集，保留20集单任务并发窗口', () => {
+  const manager = createTranslationManager({ bridge: async () => '译文' });
+  assert.throws(() => manager.start(payload(301)), /1-300/);
+  assert.equal(MAX_CONCURRENT_EPISODES, 20);
 });

@@ -40,7 +40,7 @@ test('真实 XLSX 固定四列，100 本剧本名称都出现在审核统计中'
   assert.equal(rows.length, 101);
   assert.ok(rows.every((row) => row.length === 4));
   assert.deepEqual(rows.slice(1).map((row) => row[0]), books.map((item) => item.name));
-  assert.ok(rows.slice(1).every((row) => row[1] === 2 && row[2] === '全部合格' && row[3] === null));
+  assert.ok(rows.slice(1).every((row) => row[1] === 2 && row[2] === '全部合格' && row[3] === ''));
   assert.match(sheet, /<autoFilter ref="A1:D101"\/>/);
   assert.match(sheet, /ySplit="1"[^>]*state="frozen"/);
   assert.match(sheet, /<col min="1" max="1" width="48" customWidth="1"\/>/);
@@ -53,7 +53,7 @@ test('真实 XLSX 固定四列，100 本剧本名称都出现在审核统计中'
   assert.match(files.get('xl/_rels/workbook.xml.rels').toString(), /Target="worksheets\/sheet2.xml"/);
 });
 
-test('每个不足、超限、空集分别占一行，第四列保存数字', () => {
+test('同一剧本的不足、超限、空集合并一行，集号与字数顺序对应', () => {
   const { rows } = readWorkbook([book('异常剧本', {
     passed: false, label: '需调整3集', totalEpisodes: 8,
     badEpisodes: [
@@ -62,11 +62,11 @@ test('每个不足、超限、空集分别占一行，第四列保存数字', ()
       { no: 8, n: 0, kind: 'empty', label: '空集', diff: 550 },
     ],
   })]);
-  assert.deepEqual(rows.slice(1), [
-    ['异常剧本', 8, '第2集（字数不足）', 500],
-    ['异常剧本', 8, '第6集（超过上限）', 1024],
-    ['异常剧本', 8, '第8集（空集）', 0],
-  ]);
+  assert.deepEqual(rows.slice(1), [[
+    '异常剧本', 8,
+    '第2集（字数不足）；第6集（超过上限）；第8集（空集）',
+    '500、1024、0',
+  ]]);
 });
 
 test('等待、处理中、格式失败和读取失败均保留，未知总集数留空', () => {
@@ -81,7 +81,7 @@ test('等待、处理中、格式失败和读取失败均保留，未知总集�
   const { rows, sheet } = readWorkbook(states.map(([name, status, label]) => book(name, {
     status, label, totalEpisodes: null, totalWords: null, qualifiedEpisodes: null, passed: null,
   })));
-  assert.deepEqual(rows.slice(1), states.map(([name, , label]) => [name, null, label, null]));
+  assert.deepEqual(rows.slice(1), states.map(([name, , label]) => [name, null, label, '']));
   assert.doesNotMatch(sheet, /<c r="B[2-7]"[^>]*><v>0<\/v>/);
   assert.doesNotMatch(sheet, />全部合格</);
 });
@@ -95,11 +95,8 @@ test('缺集、重复等识别问题以附加状态行展示，不误报整本�
     book('矛盾状态仍需核对', { issues: [{ type: 'missing', text: '缺少第4集' }] }),
   ]);
   assert.deepEqual(rows.slice(1), [
-    ['缺集剧本', 2, '字数合格，需核对集数', null],
-    ['缺集剧本', 2, '识别提示：缺少第2集', null],
-    ['缺集剧本', 2, '识别提示：第3集重复', null],
-    ['矛盾状态仍需核对', 2, '字数合格（存在识别提示）', null],
-    ['矛盾状态仍需核对', 2, '识别提示：缺少第4集', null],
+    ['缺集剧本', 2, '字数合格，需核对集数；识别提示：缺少第2集；识别提示：第3集重复', ''],
+    ['矛盾状态仍需核对', 2, '字数合格（存在识别提示）；识别提示：缺少第4集', ''],
   ]);
 });
 
@@ -108,7 +105,7 @@ test('剧本名和提示转义 XML，公式样式名称作为文本保存', () =
   const { rows, sheet } = readWorkbook(names.map((name) => book(name, {
     issues: [{ type: 'warning', text: 'A&B <需核对> "双引号"' }],
   })));
-  assert.deepEqual(rows.slice(1).filter((_, i) => i % 2 === 0).map((row) => row[0]), names);
+  assert.deepEqual(rows.slice(1).map((row) => row[0]), names);
   assert.match(sheet, /A&amp;B&lt;剧本&gt;&quot;引号&apos; 😀/);
   assert.match(sheet, /&lt;需核对&gt;/);
   assert.doesNotMatch(sheet, /<f(?:\s|>)/);
