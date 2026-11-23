@@ -51,6 +51,13 @@ test('正文翻译页是独立页面，并暴露两个静态入口', () => {
   assert.match(html, /id="sourceCard"/);
   assert.match(html, /id="sourceScroll"/);
   assert.match(html, /id="episodeGapWarning"/);
+  assert.match(html, /id="castGate"/);
+  assert.match(html, /删除人物行注释/);
+  assert.match(html, /台词里的 <code>Katie（打趣）：<\/code> 不是注释/);
+  assert.match(js, /\/api\/fix-cast-notes/);
+  assert.doesNotMatch(js, /jsonRequest\('\/api\/fix'/);
+  assert.match(js, /cast-identity-note/);
+  assert.match(js, /cast-unbalanced-paren/);
   assert.match(js, /sourceScrollTo/);
   assert.match(js, /syncActiveSourceFromScroll/);
   assert.match(js, /scrollIntoView/);

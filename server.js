@@ -327,6 +327,7 @@ async function handleFormat(req, res, kind) {
     if (kind === 'count') return send(res, 200, fmt.countSelection(body.paragraphs, body.lang === 'en' ? 'en' : 'zh'));
     if (kind === 'recheck') return send(res, 200, fmt.validateParagraphs(body.paragraphs, name));
     if (kind === 'fix') return send(res, 200, fmt.fixParagraphs(body.paragraphs, name));
+    if (kind === 'fix-cast-notes') return send(res, 200, fmt.fixCastNotes(body.paragraphs, name));
     // export：只有通过校验的稿件才能导出标准 docx
     const report = fmt.check(body.paragraphs);
     if (!report.ok) return send(res, 422, { error: '格式校验未通过，不能导出', errors: report.errors });
@@ -459,7 +460,7 @@ function handle(req, res) {
   const translationStatusMatch = /^\/api\/translate\/([a-f0-9]{24})$/.exec(url);
   if (get && translationStatusMatch) return handleTranslationStatus(req, res, translationStatusMatch[1]);
 
-  if (req.method === 'POST' && /^\/api\/(validate|recheck|fix|export|count)$/.test(url)) return handleFormat(req, res, url.slice(5));
+  if (req.method === 'POST' && /^\/api\/(validate|recheck|fix|fix-cast-notes|export|count)$/.test(url)) return handleFormat(req, res, url.slice(5));
   if (get && url === '/api/me') return send(res, 200, { auth: auth.enabled, user: auth.enabled ? auth.user : null }, undefined, { 'Cache-Control': 'no-store' });
   if (get && url === '/healthz') return send(res, 200, { ok: true, pending: pool.pending });
   if (get && statics.has(url)) return serveStatic(res, url);

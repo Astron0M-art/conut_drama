@@ -182,6 +182,14 @@ test('未提供 paragraphIndexes 时直接替换原正文，不增加重复译�
   assert.equal(out.filter((line) => line.includes('甲：你好')).length, 1);
 });
 
+test('人物行身份注释未清理时，翻译开始和导出都拒绝', () => {
+  const dirty = body();
+  dirty.paragraphs[4] = '人物：甲（24岁，促销员）、乙';
+  assert.throws(() => normalizePayload(dirty), (error) => error.status === 422 && error.code === 'cast_notes_blocked');
+  const manager = createTranslationManager({ mock: true });
+  assert.throws(() => manager.exportFromPayload({ ...dirty, translations: { 1: '译文' } }), (error) => error.code === 'cast_notes_blocked');
+});
+
 test('HTTP：模型可用性、无状态整本导出、停止任务；未登录一律 401', async () => {
   const get = (p, headers = {}) => fetch(base + p, { headers });
   const post = (p, bodyObj, headers = {}) => fetch(base + p, { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(bodyObj) });

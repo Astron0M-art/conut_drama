@@ -297,7 +297,21 @@
   function stopTimer() { if (state.timer) { clearInterval(state.timer); state.timer = null; } }
 
   // 模型/Coze 没配置时不让提交，避免整批集一个个失败
+  const CAST_NOTE_CODES = new Set(['cast-identity-note', 'cast-unbalanced-paren', 'cast-empty-after-note']);
+
+  function castNoteIssues() {
+    const issues = state.validation && state.validation.format && state.validation.format.issues;
+    return Array.isArray(issues) ? issues.filter((item) => CAST_NOTE_CODES.has(item.code)) : [];
+  }
+
   function translateBlocker() {
+    const notes = castNoteIssues();
+    if (notes.length) {
+      const unbalanced = notes.filter((item) => item.code === 'cast-unbalanced-paren').length;
+      return unbalanced
+        ? `人物行还有 ${unbalanced} 处括号未闭合，不能自动删除，请先改原文`
+        : '人物行含身份注释，必须先删除才能翻译';
+    }
     const info = state.models;
     if (!info) return '';
     if (!info.mock && !info.coze) return '服务器未配置 Coze 工作流凭据，暂时无法翻译';
@@ -329,6 +343,26 @@
 
   function selectedEpisodes() {
     return state.episodes.filter((episode) => state.selected.has(episode.key));
+  }
+
+  function renderCastGate(blocker) {
+    const gate = $('castGate');
+    if (!gate) return;
+    const notes = castNoteIssues();
+    if (!notes.length) { gate.hidden = true; return; }
+    const fixable = notes.filter((item) => item.code === 'cast-identity-note');
+    const unbalanced = notes.filter((item) => item.code === 'cast-unbalanced-paren');
+    const indexesByNo = episodeIndexes(state.paragraphs, state.validation && state.validation.marks);
+    const episodes = [...new Set(notes.map((item) => {
+      for (const [no, found] of indexesByNo) if (found.indexes.includes(item.para)) return no;
+      return 0;
+    }).filter(Boolean))].sort((a, b) => a - b);
+    gate.hidden = false;
+    $('castGateDetail').textContent = `${fixable.length} 处可删除${unbalanced.length ? ` · ${unbalanced.length} 处括号未闭合，不会自动删除` : ''}${episodes.length ? ` · 涉及${episodes.map((no) => `第${no}集`).join('、')}` : ''}。台词里的「角色（情绪）：」不会被删除。`;
+    const button = $('stripCastNotes');
+    button.disabled = state.busy || !fixable.length;
+    button.textContent = fixable.length ? `删除人物行注释（${fixable.length}）` : '括号未闭合，不能自动删除';
+    if (blocker && $('selectionSummary')) $('selectionSummary').textContent = blocker;
   }
 
   function renderFile() {
@@ -459,7 +493,11 @@
     $('sourceHint').textContent = `已定位 ${state.sourceEpisodes.length} 集正文 · 点击左侧集号跳转，滚动正文时左侧会跟随定位`;
     source.innerHTML = state.sourceEpisodes.map((episode) => `<article class="source-episode" id="source-episode-${esc(episode.key)}" data-episode-key="${esc(episode.key)}" data-episode-no="${esc(episode.no)}">
       <header><h3>第${fmt(episode.no)}集${episode.title ? ` · ${esc(episode.title)}` : ''}</h3><span>${fmt(episode.indexes.length)} 段正文</span></header>
-      <pre class="source-text">${esc(episode.text)}</pre>
+      <pre class="source-text">${episode.indexes.map((index) => {
+        const dirty = castNoteIssues().some((item) => item.para === index);
+        const line = esc(state.paragraphs[index] || '');
+        return dirty ? `<span class="cast-bad" data-cast-para="${index}">${line}</span>` : line;
+      }).join('\n')}</pre>
     </article>`).join('');
     const first = state.sourceEpisodes.find((episode) => episode.key === state.activeSourceKey) || state.sourceEpisodes[0];
     markActiveSource(first.key, { reveal: false });
@@ -488,6 +526,7 @@
     const blocker = translateBlocker();
     $('startTranslate').disabled = !state.paragraphs.length || !chosen.length || state.busy || Boolean(blocker);
     $('startTranslate').title = blocker || (chosen.length ? '' : '先在左侧勾选要翻译的集');
+    renderCastGate(blocker);
     $('stopTranslate').hidden = !state.busy;
     $('stopTranslate').disabled = !state.jobId;
     renderFailed();
@@ -738,8 +777,42 @@
     };
   }
 
+  async function stripCastNotes() {
+    if (state.busy) return;
+    const button = $('stripCastNotes');
+    button.disabled = true;
+    try {
+      const response = await jsonRequest('/api/fix-cast-notes', { name: state.name, paragraphs: state.paragraphs });
+      const body = await response.json();
+      state.validation = body;
+      state.paragraphs = Array.isArray(body.paragraphs) ? body.paragraphs : state.paragraphs;
+      const raw = body.analysis && Array.isArray(body.analysis.episodes) ? body.analysis.episodes : [];
+      const selectedNos = new Set(state.episodes.filter((episode) => state.selected.has(episode.key)).map((episode) => episode.no));
+      state.episodes = normalizeEpisodes(raw, state.paragraphs, body.marks);
+      state.missingEpisodes = missingEpisodeNumbers(state.episodes);
+      state.episodes.forEach((episode) => {
+        episode.status = state.statuses.get(episode.key) || 'idle';
+        if (selectedNos.has(episode.no)) state.selected.add(episode.key);
+      });
+      renderFile(); renderEpisodes(); renderSourcePreview();
+      const left = castNoteIssues();
+      toast(left.length ? `已删除可自动处理的注释，还剩 ${left.length} 处需要手工修改` : `已删除 ${body.applied || 0} 处人物行注释，可以开始翻译`);
+      if (left.length) $('castGate').scrollIntoView({ block: 'center', behavior: 'smooth' });
+    } catch (error) {
+      showError(error.message || '删除人物行注释失败');
+      renderEpisodes();
+    }
+  }
+
   async function startTranslation() {
     if (state.busy) return;
+    const notes = castNoteIssues();
+    if (notes.length) {
+      showError(translateBlocker());
+      const gate = $('castGate');
+      if (gate) gate.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      return;
+    }
     const selected = selectedEpisodes();
     if (!selected.length) { toast('先选择要翻译的集'); return; }
     const blocker = translateBlocker();
@@ -948,6 +1021,7 @@
       if (row) sourceScrollTo(row.dataset.episodeKey);
     });
     $('startTranslate').addEventListener('click', startTranslation);
+    $('stripCastNotes').addEventListener('click', stripCastNotes);
     $('exportTranslate').addEventListener('click', exportTranslation);
     $('stopTranslate').addEventListener('click', stopTranslation);
     $('retryFailed').addEventListener('click', () => {

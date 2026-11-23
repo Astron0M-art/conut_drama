@@ -56,6 +56,7 @@
       <div>
         <h3>需要知道</h3>
         <ul>
+          <li>场次里的<b>「人物：」行只保留人名</b>。成对的身份注释（如 <code>Katie（24岁，促销员）</code>）必须先点「删除人物行注释」才能翻译；台词里的 <code>Katie（打趣）：</code> 不是注释，不会删除。</li>
           <li>原稿里<b>已有的括号外译</b>（如 <code>（西：…）</code>）送去翻译前会先去掉，避免重复翻译。</li>
           <li>导出有两种：<b>覆盖原正文</b>（只剩译文）或<b>保留原文并附译文</b>（中外对照）。都会生成新文件，不改你的原稿。</li>
           <li>可以只翻译一部分集再导出，<b>没翻译的集保留中文原文</b>；已完成的译文保存在本页，分批翻译、失败重试都不会丢。</li>
@@ -79,6 +80,13 @@
       </div>
     </div>
 
+    <section class="cast-gate" id="castGate" hidden role="alert" aria-live="assertive">
+      <div>
+        <h2>人物行含身份注释，必须先删除才能翻译</h2>
+        <p id="castGateDetail">正在检查人物行。</p>
+      </div>
+      <button class="cast-gate-btn" id="stripCastNotes" type="button">删除人物行注释</button>
+    </section>
     <div class="translate-layout">
       <aside class="episode-panel" aria-label="正文集列表">
         <div class="panel-head">

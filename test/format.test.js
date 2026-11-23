@@ -3,7 +3,7 @@ const { test } = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
-const { check, autoFix, validateParagraphs, exportDocx, readParagraphs, validateBuffer } = require('../lib/format');
+const { check, autoFix, autoFixCastNotes, validateParagraphs, exportDocx, readParagraphs, validateBuffer } = require('../lib/format');
 
 const REF = path.join(__dirname, 'fixtures', 'reference.docx');
 const ref = () => readParagraphs(fs.readFileSync(REF), '.docx');
@@ -219,6 +219,37 @@ test('独立成行的「（中：…）」译文行：保留，不提示不报�
   const r = check(p);
   assert.ok(r.ok && r.issues.length === 0);
   assert.ok(autoFix(p).paras.includes(t));
+});
+
+test('人物行只删除成对全角身份注释，台词、字幕、未闭合和半角括号都不改', () => {
+  const p = [
+    '《对标》', '人物小传', '姓名：Katie（24岁，促销员）', '正文内容',
+    '第1集', '1-1 日 内 展台',
+    '人物：Katie（24岁，咖啡快闪促销员）、兼职员、Micah（28岁，Kape Silang 创始人）、财务助理',
+    '【字幕：大马尼拉·马卡蒂（Makati, Metro Manila）】',
+    '△ 暴雨疯狂拍打着大厦的落地玻璃幕墙。',
+    'Katie（打趣）：看看这个。',
+    '人物：Katie（24岁，促销员、Micah',
+    '人物：Katie (24)',
+    '1-2 日 内 中庭', '人物：Katie、路人若干',
+  ];
+  const r = check(p);
+  assert.ok(r.ok, '人物行注释不改变字数页的格式通过判定');
+  const notes = r.issues.filter((item) => item.code === 'cast-identity-note');
+  assert.strictEqual(notes.length, 1);
+  assert.strictEqual(notes[0].fix.text, '人物：Katie、兼职员、Micah、财务助理');
+  assert.ok(r.issues.some((item) => item.code === 'cast-unbalanced-paren'));
+  assert.ok(!r.issues.some((item) => item.code === 'cast-identity-note' && item.para === p.indexOf('人物：Katie (24)')));
+  const fixed = autoFixCastNotes(p);
+  assert.strictEqual(fixed.paras[p.indexOf(p[6])], '人物：Katie、兼职员、Micah、财务助理');
+  assert.ok(fixed.paras.includes('Katie（打趣）：看看这个。'));
+  assert.ok(fixed.paras.includes('【字幕：大马尼拉·马卡蒂（Makati, Metro Manila）】'));
+  assert.ok(fixed.paras.includes('姓名：Katie（24岁，促销员）'));
+  assert.ok(fixed.paras.includes('人物：Katie（24岁，促销员、Micah'));
+  assert.ok(fixed.paras.includes('人物：Katie (24)'));
+  assert.ok(fixed.paras.includes('人物：Katie、路人若干'));
+  const nested = autoFixCastNotes(['正文内容', '第1集', '1-1 日 内 展台', '人物：Micah（28岁，（Kape）创始人）、财务助理']);
+  assert.strictEqual(nested.paras.at(-1), '人物：Micah、财务助理');
 });
 
 test('场次头、人物行字数可单独组合：full = pure + 场次头 + 人物行；选区同理', () => {
